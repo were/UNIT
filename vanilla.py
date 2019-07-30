@@ -52,16 +52,18 @@ def vectorize_init(stmt):
                             values = []
                             dtype = 'int8x64'
                             loads = []
-                            for i in range(4):
-                                new_load = tvm.make.Load('int8', load.buffer_var, index + tvm.const(i, 'int32'))
-                                loads.append(tvm.make.Broadcast(new_load, 16))
-                            #index = tvm.make.Broadcast(index, 4)
-                            #index = index + tvm.make.Ramp(tvm.const(0, 'int32'), tvm.const(1, 'int32'), 4)
-                            #aword = tvm.make.Load('int8x4', load.buffer_var,
-                            #                      index,
-                            #                      tvm.const(1, 'int32x4'))
-                            new_load = tvm.make.Shuffle(loads, [tvm.const(i, 'int32') for i in range(64)])
-                            print(new_load)
+                            #for i in range(4):
+                            #    new_load = tvm.make.Load('int8', load.buffer_var, index + tvm.const(i, 'int32'))
+                            #    loads.append(tvm.make.Broadcast(new_load, 16))
+                            #new_load = tvm.make.Shuffle(loads, [tvm.const(i, 'int32') for i in range(64)])
+
+                            index = tvm.make.Ramp(index, tvm.const(1, 'int32'), 4)
+                            aword = tvm.make.Load('int8x4', load.buffer_var,
+                                                  index,
+                                                  tvm.const(1, 'int32x4'))
+                            aword = tvm.call_pure_intrin('int32', 'reinterpret', aword)
+                            new_load = tvm.make.Broadcast(aword, 16)
+                            #new_load = tvm.make.Shuffle([aword] * 16, [tvm.const(i, 'int32') for i in range(64)])
                         else:
                             lhs = tvm.make.Broadcast(index, 64)
                             rhs = tvm.make.Ramp(tvm.const(0, 'int32'), tvm.const(1, 'int32'), 64)
@@ -69,8 +71,8 @@ def vectorize_init(stmt):
                             index = lhs + rhs
                             new_load = tvm.make.Load(dtype, load.buffer_var, index,
                                                      tvm.const(1, index.dtype))
-                            #indeces = [tvm.const((i % 4) * 16 + i // 4, 'int32') for i in range(64)]
-                            #new_load = tvm.make.Shuffle([new_load], indeces)
+                            indeces = [tvm.const((i % 4) * 16 + i // 4, 'int32') for i in range(64)]
+                            new_load = tvm.make.Shuffle([new_load], indeces)
                         new_loads.append(new_load)
 
                     buffer_var = new_loads[0].buffer_var
@@ -142,7 +144,7 @@ with tvm.target.create('llvm'):
         shapes = [list(map(lambda x: x.value, i)) for i in shapes]
         out_shape = list(map(lambda x: x.value, conv.shape)) 
         types = ['int8', 'int8', 'int32']
-        args = [tvm.ndarray.array(np.random.randint(1, 2, i, j)) for i, j in zip(shapes, types)]
+        args = [tvm.ndarray.array(np.random.randint(0, 127, i, j)) for i, j in zip(shapes, types)]
         out = tvm.ndarray.array(np.zeros(out_shape).astype('int32'))
         ans = tvm.ndarray.array(np.zeros(out_shape).astype('int32'))
 
