@@ -11,6 +11,6 @@ sch[c.op].vectorize(i)
 
 func = tvm.lower(sch, [a, b])
 
-a = tvm.build(sch, [a, b])
+a = tvm.build(sch, [a, b], target='c')
 
-#print(a.get_source())
+print(a.get_source())
