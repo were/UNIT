@@ -108,8 +108,8 @@ def vnni_transformation(stmt):
 with tvm.target.create('llvm'):
     N, C, H, W, c = 1, 2, 192, 192, 4
     kN, C, kH, kW, kc, kn = 1, C, 32, 32, c, 16
-    image = tvm.placeholder((1, 2, 192, 192, 4), dtype='int8', name='input')
-    kernel = tvm.placeholder((1, 2, 32, 32, 4, 16), dtype='int8', name='kernel')
+    image = tvm.placeholder((N, C, H, W, c), dtype='int8', name='input')
+    kernel = tvm.placeholder((kN, C, kH, kW, kc, kn), dtype='int8', name='kernel')
 
     conv = topi.nn.conv2d_NCHWc(image, kernel, stride=(1, 1), padding=(0, 0), dilation=(1, 1),
                                 layout='NCHW%dc' % c, out_layout = 'NCHW4c', out_dtype='int32')
@@ -117,11 +117,20 @@ with tvm.target.create('llvm'):
     print(kernel.shape)
 
     sch = tvm.create_schedule(conv.op)
+
     n, c0, h, w, c1 = conv.op.axis
     rc, rh, rw = conv.op.reduce_axis
     rco, rci = sch[conv].split(rc, c)
     c1o, c1i = sch[conv].split(c1, 16)
     rwo, rwi = sch[conv].split(rw, 16)
+
+    in_cache = sch.cache_read(image, 'global', [conv])
+    sch[in_cache].compute_at(sch[conv], w)
+    axis = sch[in_cache].fuse(in_cache.op.axis[3], in_cache.op.axis[4])
+    sch[in_cache].vectorize(axis)
+
+
+    sch[conv].parallel(h)
     sch[conv].reorder(n, c0, h, rh, c1o, rco, rwo, w, rwi, c1i, rci)
     sch[conv].pragma(c1i, 'vnni')
 
