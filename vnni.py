@@ -1,3 +1,7 @@
+# TODO(@were): Simplify the usage of linear detection.
+# TODO(@were): Support masking.
+# TODO(@were): Integrate it to TVM.
+
 import tvm
 import topi
 import numpy as np

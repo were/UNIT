@@ -1,3 +1,6 @@
+// A simple proof of concept to make sure the semantics of VNNI.
+// The official doc is incorrect!
+
 #include <x86intrin.h>
 #include <cassert>
 #include <cstdint>
