@@ -31,7 +31,7 @@ with tvm.target.create('llvm'):
     sch[in_cache].vectorize(axis)
 
 
-    sch[conv].parallel(h)
+    #sch[conv].parallel(h)
     sch[conv].reorder(n, c0, h, rh, c1o, rco, rwo, w, rwi, c1i, rci)
     sch[conv].pragma(c1i, 'vnni')
 
