@@ -3,7 +3,7 @@ import topi
 import numpy as np
 
 
-n, k, m = 4096, 4096, 4096
+n, k, m = 1024, 1024, 1024
 a = tvm.placeholder((n, k), 'int8', name='a')
 b = tvm.placeholder((m, k), 'int8', name='b')
 
@@ -14,28 +14,25 @@ c = tvm.compute((n, m),
         lambda x, y: tvm.sum(a[x, red].astype('int32') * packed_b[y // 16, red // 4, y % 16, red % 4].astype('int32'), axis=red),
         name='c')
 
-sch = tvm.create_schedule(c.op)
-
-
-#
-sch[packed_b].vectorize(packed_b.op.axis[-1])
-sch[packed_b].unroll(packed_b.op.axis[-2])
-
-x, y = c.op.axis
-r = c.op.reduce_axis[0]
-yo, yi = sch[c].split(y, 16)
-ro, ri = sch[c].split(r, 4)
-
-#
 import vnni
 with tvm.build_config(add_lower_pass= [(1, vnni.vnni_transformation)]):
-    sch[c].pragma(yi, 'vnni')
+    sch = tvm.create_schedule(c.op)
+
+    sch[packed_b].vectorize(packed_b.op.axis[-1])
+    sch[packed_b].unroll(packed_b.op.axis[-2])
+
+    x, y = c.op.axis
+    r = c.op.reduce_axis[0]
+    ro, ri = sch[c].split(r, 4)
     roo, roi = sch[c].split(ro, 16)
+    xo, yo, xi, yi = sch[c].tile(x, y, 32, 16)
+    sch[c].pragma(yi, 'vnni')
+    sch[c].reorder(xo, yo, roo, xi, roi, yi, ri)
+
     cached_a = sch.cache_read(a, 'global', [c])
     sch[cached_a].vectorize(cached_a.op.axis[1])
-    xo, xi = sch[c].split(x, 32)
     sch[cached_a].compute_at(sch[c], xi)
-    sch[c].reorder(xo, yo, roo, xi, roi, yi, ri)
+
     print(tvm.lower(sch, [a, b, c], simple_mode=True))
     module = tvm.build(sch, [a, b, c], target='llvm -mcpu=cascadelake')
 
