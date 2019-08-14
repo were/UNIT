@@ -54,6 +54,7 @@ extern "C" __global__ void default_function_kernel0( half* __restrict__ a,  half
 }
 
 int main() {
+
   half *a, *b;
   float *c;
 
@@ -62,7 +63,9 @@ int main() {
   cudaMalloc(&c, 4096 * 4096 * (sizeof (float)));
 
   begin_roi();
-  default_function_kernel0<<<64, 64>>>(a, b, c);
+  for (int i = 0; i < 10; ++i) {
+    default_function_kernel0<<<64, 64>>>(a, b, c);
+  }
   assert(cudaDeviceSynchronize() == cudaSuccess);
   end_roi();
 

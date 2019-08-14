@@ -44,8 +44,8 @@ sch[c].reorder(xoo, yoo, xoi, yoi, xi, yi)
 
 sch[c_write].compute_at(sch[c], yoi)
 
-#b_shared = sch.cache_read(b, 'shared', [c_write])
-#sch[b_shared].compute_at(sch[c_write], ri)
+b_shared = sch.cache_read(b, 'shared', [c_write])
+sch[b_shared].compute_at(sch[c_write], ri)
 
 def toucher(op):
     if isinstance(op, tvm.stmt.For):
