@@ -77,6 +77,7 @@ def vnni_transformation(stmt):
                         value = tvm.make.Load(elem.dtype + 'x%d' % bound, elem.buffer_var, to_load,
                                               tvm.const(1, 'int32x%d' % bound))
                         assert 64 % bound == 0
+
                         operands.append(tvm.make.Shuffle([value] * (64 // bound), [tvm.const(i, 'int32') for i in indeces]))
 
                     buffer_var = store[0].buffer_var
