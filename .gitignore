@@ -1,4 +1,5 @@
 *.out
 *.ll
 *.exe
+*.s
 __pycache__

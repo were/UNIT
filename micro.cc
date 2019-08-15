@@ -30,7 +30,7 @@ void kernel() {
   _a = _mm512_load_si512(a);
   _b = _mm512_load_si512(b);
   _c = _mm512_load_si512(c);
-  for (int i = 0; i < 1024 * 1024 * 1024; ++i) {
+  for (int64_t i = 0; i < (int64_t)(5.3425e9); ++i) {
     _d = _mm512_load_si512(d[i % 8]);
     _d = _mm512_dpbusd_epi32(_d, _a, _b);
     _mm512_store_epi32(d[i % 8], _d);
