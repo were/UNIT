@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include "util.h"
+#include "../util.h"
 
 uint8_t a[64];
 uint8_t b[64];

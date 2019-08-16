@@ -4,7 +4,7 @@
 
 #include "mkldnn.h"
 
-#include "util.h"
+#include "../util.h"
 
 int main() {
   int n = 4096, m = 4096, k = 4096;

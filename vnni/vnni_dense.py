@@ -3,7 +3,7 @@ import topi
 import numpy as np
 
 
-n, k, m = 4096, 4096, 4096
+n, k, m = 1024, 1024, 1024
 a = tvm.placeholder((n, k), 'int8', name='a')
 b = tvm.placeholder((m, k), 'int8', name='b')
 
@@ -27,10 +27,11 @@ sch[packed_b].unroll(packed_b.op.axis[-2])
 cc = sch.cache_write(c, 'global')
 
 x, y = c.op.axis
-#r = c.op.reduce_axis[0]
-#ro, ri = sch[c].split(r, 4)
-#roo, roi = sch[c].split(ro, 16)
 xo, yo, xi, yi = sch[c].tile(x, y, 32, 32)
+#xoo, xoi = sch[c].split(xo, nparts=4)
+#yoo, yoi = sch[c].split(yo, nparts=4)
+#sch[c].unroll(xoo)
+#sch[c].unroll(yoo)
 sch[cc].compute_at(sch[c], yo)
 
 r = cc.op.reduce_axis[0]
