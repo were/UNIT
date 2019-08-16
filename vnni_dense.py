@@ -3,7 +3,7 @@ import topi
 import numpy as np
 
 
-n, k, m = 1024, 1024, 1024
+n, k, m = 4096, 4096, 4096
 a = tvm.placeholder((n, k), 'int8', name='a')
 b = tvm.placeholder((m, k), 'int8', name='b')
 
