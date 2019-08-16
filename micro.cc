@@ -5,36 +5,49 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
-#include <sys/time.h>
+
+#include "util.h"
 
 uint8_t a[64];
 uint8_t b[64];
 uint8_t c[64];
 uint32_t d[8][16];
 
-struct timeval tv0, tv1;
-
-void begin_roi() {
-  gettimeofday(&tv0, nullptr);
-}
-
-#define TV_TO_SEC(tv) (tv.tv_sec * 1000000 + tv.tv_usec)
-
-void end_roi() {
-  gettimeofday(&tv1, nullptr);
-  std::cout << TV_TO_SEC(tv1) - TV_TO_SEC(tv0) << std::endl;
-}
-
 void kernel() {
-  __m512i _a, _b, _c, _d;
+  __m512i _a, _b, _c, _d0, _d1, _d2, _d3, _d4, _d5, _d6, _d7;
   _a = _mm512_load_si512(a);
   _b = _mm512_load_si512(b);
   _c = _mm512_load_si512(c);
-  for (int64_t i = 0; i < (int64_t)(5.3425e9); ++i) {
-    _d = _mm512_load_si512(d[i % 8]);
-    _d = _mm512_dpbusd_epi32(_d, _a, _b);
-    _mm512_store_epi32(d[i % 8], _d);
+
+  _d0 = _mm512_load_si512(d[0]);
+  _d1 = _mm512_load_si512(d[1]);
+  _d2 = _mm512_load_si512(d[2]);
+  _d3 = _mm512_load_si512(d[3]);
+  _d4 = _mm512_load_si512(d[4]);
+  _d5 = _mm512_load_si512(d[5]);
+  _d6 = _mm512_load_si512(d[6]);
+  _d7 = _mm512_load_si512(d[7]);
+
+  int64_t n = 5ll * 1024 * 1024 * 1024;
+  for (int64_t i = 0; i < n; i += 8) {
+    _d0 = _mm512_dpbusd_epi32(_d0, _a, _b);
+    _d1 = _mm512_dpbusd_epi32(_d1, _a, _b);
+    _d2 = _mm512_dpbusd_epi32(_d2, _a, _b);
+    _d3 = _mm512_dpbusd_epi32(_d3, _a, _b);
+    _d4 = _mm512_dpbusd_epi32(_d4, _a, _b);
+    _d5 = _mm512_dpbusd_epi32(_d5, _a, _b);
+    _d6 = _mm512_dpbusd_epi32(_d6, _a, _b);
+    _d7 = _mm512_dpbusd_epi32(_d7, _a, _b);
   }
+
+  _mm512_store_epi32(d[0], _d0);
+  _mm512_store_epi32(d[1], _d1);
+  _mm512_store_epi32(d[2], _d2);
+  _mm512_store_epi32(d[3], _d3);
+  _mm512_store_epi32(d[4], _d4);
+  _mm512_store_epi32(d[5], _d5);
+  _mm512_store_epi32(d[6], _d6);
+  _mm512_store_epi32(d[7], _d7);
 }
 
 int main() {
