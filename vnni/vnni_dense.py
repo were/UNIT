@@ -3,7 +3,7 @@ import topi
 import numpy as np
 
 
-n, k, m = 1024, 1024, 1024
+n, k, m = 2048, 2048, 2048
 a = tvm.placeholder((n, k), 'int8', name='a')
 b = tvm.placeholder((m, k), 'int8', name='b')
 
@@ -27,26 +27,21 @@ sch[packed_b].unroll(packed_b.op.axis[-2])
 cc = sch.cache_write(c, 'global')
 
 x, y = c.op.axis
-xo, yo, xi, yi = sch[c].tile(x, y, 32, 32)
-#xoo, xoi = sch[c].split(xo, nparts=4)
-#yoo, yoi = sch[c].split(yo, nparts=4)
-#sch[c].unroll(xoo)
-#sch[c].unroll(yoo)
+xo, yo, xi, yi = sch[c].tile(x, y, 32, 16)
 sch[cc].compute_at(sch[c], yo)
 
 r = cc.op.reduce_axis[0]
 ro, ri = sch[cc].split(r, 4)
-roo, roi = sch[cc].split(ro, 16)
 xc, yc = cc.op.axis
 xco, xci = sch[cc].split(xc, 16)
-yco, yci = sch[cc].split(yc, 16)
-sch[cc].reorder(xco, roo, yco, roi, xci, yci, ri)
+#yco, yci = sch[cc].split(yc, 16)
+sch[cc].reorder(xco, ro, xci, yc, ri)
 sch[cc].unroll(xci)
-sch[cc].pragma(yci, 'vnni')
+sch[cc].pragma(yc, 'vnni')
 
 cached_a = sch.cache_read(packed_a, 'global', [cc])
 sch[cached_a].vectorize(cached_a.op.axis[1])
-sch[cached_a].compute_at(sch[cc], roi)
+sch[cached_a].compute_at(sch[cc], ro)
 fused = sch[cached_a].fuse(cached_a.op.axis[2], cached_a.op.axis[3])
 sch[cached_a].vectorize(fused)
 
@@ -71,5 +66,5 @@ with tvm.build_config(add_lower_pass= [(1, vnni.vnni_transformation)]):
 
     module.save('dense.ll')
 
-    module = module.time_evaluator(module.entry_name, tvm.cpu(0), number=10)
+    module = module.time_evaluator(module.entry_name, tvm.cpu(0), number=100)
     print(module(nd_a, nd_b, nd_c).mean)
