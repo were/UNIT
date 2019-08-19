@@ -7,10 +7,12 @@ import topi
 import numpy as np
 
 with tvm.target.create('llvm'):
-    N, C, H, W, c = 1, 2, 191, 191, 4
-    kN, C, kH, kW, kc, kn = 1, C, 32, 32, c, 16
+
+    N, C, H, W, c = 1, 32, 191, 191, 4
     image = tvm.placeholder((N, C, H, W, c), dtype='int8', name='input')
-    kernel = tvm.placeholder((kN, C, kH, kW, kc, kn), dtype='int8', name='kernel')
+
+    kN, C, kH, kW, kc, kn = 8, C, 32, 32, c, 16
+    kernel = tvm.placeholder((kN, C, kH, kW, kn, kc), dtype='int8', name='kernel')
 
     rc = tvm.reduce_axis((0, c * C), 'rc')
     rh = tvm.reduce_axis((0, kH), 'rh')
@@ -19,7 +21,7 @@ with tvm.target.create('llvm'):
     oshape = (N, kN, H - kH + 1, W - kW + 1, kn)
     conv = tvm.compute(oshape,
             lambda n, c0, h, w, c1: tvm.sum(
-                image[n, rc // c, h + rh, w + rw, rc % c].astype('int32') * kernel[c0, rc // c, rh, rw, rc % c, c1],
+                image[n, rc // c, h + rh, w + rw, rc % c].astype('int32') * kernel[c0, rc // c, rh, rw, c1, rc % c],
                 axis=[rc, rh, rw]), name='conv2d_HCHWc')
     print(conv.shape)
     print(kernel.shape)
@@ -34,8 +36,8 @@ with tvm.target.create('llvm'):
     c1o, c1i = sch[conv].split(c1, 16)
     rwo, rwi = sch[conv].split(rw, 16)
 
-    #wo, wi = sch[conv].split(w, 8)
-    #sch[conv].unroll(wi)
+    #wo, wi = sch[conv].split(w, 16)
+    sch[conv].unroll(rwi)
 
     in_cache = sch.cache_read(image, 'global', [conv])
     sch[in_cache].compute_at(sch[conv], w)
@@ -68,7 +70,7 @@ with tvm.target.create('llvm'):
         answer_ref(args[0], args[1], ans)
         tvm.testing.assert_allclose(out.asnumpy(), ans.asnumpy())
 
-        vannila = answer_ref.time_evaluator(answer_ref.entry_name, tvm.cpu(0), number=10)
-        vnni = module.time_evaluator(module.entry_name, tvm.cpu(0), number=10)
-        print(vannila(args[0], args[1], ans).mean)
+        #vannila = answer_ref.time_evaluator(answer_ref.entry_name, tvm.cpu(0), number=10)
+        vnni = module.time_evaluator(module.entry_name, tvm.cpu(0), number=5)
+        #print(vannila(args[0], args[1], ans).mean)
         print(vnni(args[0], args[1], out).mean)

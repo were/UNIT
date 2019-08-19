@@ -9,7 +9,7 @@ void begin_roi() {
 
 #define TV_TO_SEC(tv) (tv.tv_sec * 1000000 + tv.tv_usec)
 
-void end_roi() {
+int64_t end_roi() {
   gettimeofday(&tv1, nullptr);
-  std::cout << TV_TO_SEC(tv1) - TV_TO_SEC(tv0) << std::endl;
+  return TV_TO_SEC(tv1) - TV_TO_SEC(tv0);
 }
