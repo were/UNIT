@@ -3,7 +3,7 @@ import topi
 import numpy as np
 
 
-n, k, m = 2048, 2048, 2048
+n = k = m = 2048
 a = tvm.placeholder((n, k), 'int8', name='a')
 b = tvm.placeholder((m, k), 'int8', name='b')
 
@@ -67,4 +67,4 @@ with tvm.build_config(add_lower_pass= [(1, vnni.vnni_transformation)]):
     module.save('dense.ll')
 
     module = module.time_evaluator(module.entry_name, tvm.cpu(0), number=100)
-    print(module(nd_a, nd_b, nd_c).mean)
+    print('%.2f GVNNI/s' % (n * m * k / 64 / module(nd_a, nd_b, nd_c).mean / 1e9))

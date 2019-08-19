@@ -28,7 +28,10 @@ int main() {
                                       c, m, &co);
       assert(status == mkldnn_success);
     }
-    end_roi();
+    float res = end_roi();
+    float gvnnis = (float) n * m * k / 64.f / res / 10.0;
+    printf("Execution time: %.5f\n", res / 100. / 1000000.);
+    printf("%.2f GVNNI/s\n", gvnnis / 8 * 7);
   }
 
   return 0;

@@ -7,23 +7,35 @@ import topi
 import numpy as np
 
 with tvm.target.create('llvm'):
-    N, C, H, W, c = 1, 2, 192, 192, 4
+    N, C, H, W, c = 1, 2, 191, 191, 4
     kN, C, kH, kW, kc, kn = 1, C, 32, 32, c, 16
     image = tvm.placeholder((N, C, H, W, c), dtype='int8', name='input')
     kernel = tvm.placeholder((kN, C, kH, kW, kc, kn), dtype='int8', name='kernel')
 
-    conv = topi.nn.conv2d_NCHWc(image, kernel, stride=(1, 1), padding=(0, 0), dilation=(1, 1),
-                                layout='NCHW%dc' % c, out_layout = 'NCHW4c', out_dtype='int32')
+    rc = tvm.reduce_axis((0, c * C), 'rc')
+    rh = tvm.reduce_axis((0, kH), 'rh')
+    rw = tvm.reduce_axis((0, kW), 'rw')
+
+    oshape = (N, kN, H - kH + 1, W - kW + 1, kn)
+    conv = tvm.compute(oshape,
+            lambda n, c0, h, w, c1: tvm.sum(
+                image[n, rc // c, h + rh, w + rw, rc % c].astype('int32') * kernel[c0, rc // c, rh, rw, rc % c, c1],
+                axis=[rc, rh, rw]), name='conv2d_HCHWc')
     print(conv.shape)
     print(kernel.shape)
 
     sch = tvm.create_schedule(conv.op)
+
+    print(tvm.lower(sch, [image, kernel, conv], simple_mode=True))
 
     n, c0, h, w, c1 = conv.op.axis
     rc, rh, rw = conv.op.reduce_axis
     rco, rci = sch[conv].split(rc, c)
     c1o, c1i = sch[conv].split(c1, 16)
     rwo, rwi = sch[conv].split(rw, 16)
+
+    #wo, wi = sch[conv].split(w, 8)
+    #sch[conv].unroll(wi)
 
     in_cache = sch.cache_read(image, 'global', [conv])
     sch[in_cache].compute_at(sch[conv], w)
