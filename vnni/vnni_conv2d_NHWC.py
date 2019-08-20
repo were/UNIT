@@ -22,6 +22,7 @@ sch = tvm.create_schedule(conv.op)
 
 bn, x, y, oc = conv.op.axis
 rc, rh, rw = conv.op.reduce_axis
+sch[conv].parallel(x)
 
 
 oco, oci = sch[conv].split(oc, 16)

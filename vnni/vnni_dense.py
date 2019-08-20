@@ -28,6 +28,7 @@ cc = sch.cache_write(c, 'global')
 
 x, y = c.op.axis
 xo, yo, xi, yi = sch[c].tile(x, y, 32, 16)
+#sch[c].parallel(xo)
 sch[cc].compute_at(sch[c], yo)
 
 r = cc.op.reduce_axis[0]
