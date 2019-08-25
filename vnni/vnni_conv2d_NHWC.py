@@ -1,7 +1,7 @@
 import tvm
 
-n, h, w, c = 1, 128, 128, 128
-o, kc, kh, kw = 128, c, 3, 3
+n, h, w, c = 1, 128, 128, 64
+o, kc, kh, kw = 64, c, 3, 3
 
 img = tvm.placeholder((n, h, w, c), 'int8', 'input')
 knl = tvm.placeholder((kh, kw, o // 16, c // 4, 16, 4), 'int8', 'kernel')
@@ -29,6 +29,7 @@ oco, oci = sch[conv].split(oc, 16)
 rco, rci = sch[conv].split(rc, 4)
 
 sch[conv].reorder(bn, x, rh, rw, y, rco, oco, oci, rci)
+#sch[conv].unroll(oco)
 sch[conv].pragma(oci, 'vnni')
 #cached = sch.cache_read(img, 'global', [conv])
 #sch[cached].compute_at(sch[conv], y)
@@ -50,6 +51,7 @@ with tvm.build_config(add_lower_pass= [(1, vnni.vnni_transformation)]):
 
     #vannila(args[0], args[1], ans)
     module(args[0], args[1], out)
+    module.save('nhwc.ll')
     #tvm.testing.assert_allclose(out.asnumpy(), ans.asnumpy())
 
     module = module.time_evaluator(module.entry_name, tvm.cpu(0), number=1)
