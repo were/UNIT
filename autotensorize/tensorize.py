@@ -1,4 +1,5 @@
 import tvm
+from . import util
 
 def _orders(body):
     first, post = [], []
@@ -13,6 +14,7 @@ def _orders(body):
             lst.append(op.dtype)
             lst.append(op.value.dtype)
         else:
+            lst.append(op.dtype)
             lst.append(type(op))
         return None
 
@@ -45,25 +47,42 @@ def preprocessor(a, stencil):
     if not tensorizable(a, stencil):
         return None
 
+    assert len(stencil.op.axis) == len(stencil.shape)
     sch = tvm.create_schedule(a.op)
-    outers = []
     inners = []
 
-    assert len(stencil.op.axis) == len(stencil.shape)
+    dom_map = {}
+    for i in list(a.op.axis) + list(a.op.reduce_axis):
+        dom_map[i] = util.as_const_int(i.dom.extent)
+
+    def update_split(map_, stage, axis, factor, is_stencil=False, inners=None):
+        extent = map_[axis]
+        map_.pop(axis)
+        outer, inner = stage.split(axis, factor)
+        map_[outer] = extent // factor
+        # If this belongs to the stencil, it will be reordered as the inner most loops.
+        if is_stencil:
+            assert inners is not None
+            inners.append(inner)
+        else:
+            map_[inner] = factor
+
 
     def split(axis, template):
         n, m = len(axis), len(template)
-        for i in range(n - m):
-            outers.append(axis[i])
         for i in range(m):
-            assert isinstance(template[i].dom.extent, (tvm.expr.IntImm, tvm.expr.UIntImm))
-            outer, inner = sch[a].split(axis[i + n - m], template[i].dom.extent.value)
-            outers.append(outer)
-            inners.append(inner)
+            update_split(dom_map, sch[a], axis[i + n - m],
+                    util.as_const_int(template[i].dom.extent), True, inners)
 
     split(a.op.axis, stencil.op.axis)
     split(a.op.reduce_axis, stencil.op.reduce_axis)
 
-    sch[a].reorder(*(outers + inners))
+    to_tile = util.extract_tiling(tvm.build_module.form_body(sch), list(dom_map.keys()))
 
-    return sch, outers, inners
+    for i in list(dom_map.keys()):
+        if str(i.var) in to_tile.keys():
+            update_split(dom_map, sch[a], i, to_tile[str(i.var)])
+
+    sch[a].reorder(*(list(dom_map.keys()) + inners))
+
+    return sch, dom_map, inners

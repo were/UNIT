@@ -1,7 +1,7 @@
 import tvm
 
-n, h, w, c = 1, 128, 128, 64
-o, kc, kh, kw = 64, c, 3, 3
+n, h, w, c = 1, 128, 128, 128
+o, kc, kh, kw = 128, c, 3, 3
 
 img = tvm.placeholder((n, h, w, c), 'int8', 'input')
 knl = tvm.placeholder((kh, kw, o // 16, c // 4, 16, 4), 'int8', 'kernel')
@@ -22,7 +22,7 @@ sch = tvm.create_schedule(conv.op)
 
 bn, x, y, oc = conv.op.axis
 rc, rh, rw = conv.op.reduce_axis
-sch[conv].parallel(x)
+#sch[conv].parallel(x)
 
 
 oco, oci = sch[conv].split(oc, 16)

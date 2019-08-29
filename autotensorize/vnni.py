@@ -1,11 +1,7 @@
 import tvm
+from . import util
 
-def as_const_int(expr):
-    if isinstance(expr, (tvm.expr.IntImm, tvm.expr.UIntImm)):
-        return expr.value
-    return None
-
-def pass(stmt):
+def customized_pass(stmt):
 
     to_vectorize = []
     outer_loops = []
@@ -46,8 +42,8 @@ def pass(stmt):
                     inner, outer = loops
                     loops = loops[::-1]
 
-                    inner_ext = as_const_int(inner.extent)
-                    outer_ext = as_const_int(outer.extent)
+                    inner_ext = util.as_const_int(inner.extent)
+                    outer_ext = util.as_const_int(outer.extent)
                     assert inner_ext is not None and outer_ext is not None
                     assert outer_ext ==16 and inner_ext == 4
 
@@ -60,8 +56,8 @@ def pass(stmt):
                         iters = [i.loop_var for i in outer_loops + loops]
                         coef = tvm.arith.DetectLinearEquation(elem.index, iters)
                         base_index = sum(i * j for i, j in zip(iters[:-2], coef)) + coef[-1]
-                        inner_stride = as_const_int(coef[-2])
-                        outer_stride = as_const_int(coef[-3])
+                        inner_stride = util.as_const_int(coef[-2])
+                        outer_stride = util.as_const_int(coef[-3])
                         assert inner_stride is not None and outer_stride is not None
 
                         if tvm.ir_pass.Equal(elem.buffer_var, store[0].buffer_var):
