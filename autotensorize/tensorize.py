@@ -40,6 +40,42 @@ def tensorizable(a, stencil):
 
     return True
 
+
+from tvm import autotvm
+
+def define_space(comp, stencil, args, pragma):
+
+    cfg = autotvm.get_config()
+    sch = tvm.create_schedule(comp.op)
+
+    def define_split(a, b, outers, inners):
+        n, m = len(a), len(b)
+        for i in range(n - m):
+            cfg.define_split('split_%s' % a[i], a[i], num_outputs=3)
+            axes = cfg['split_%s' % a[i]].apply(sch, comp, a[i])
+            outers += list(axes)
+
+        for i in range(m):
+            cfg.define_split('split_%s' % a[i + n - m], a[i + n - m],
+                policy='all', num_outputs=4,
+                filter=lambda x: x.size[-1] == autotvm.util.get_const_int(b[i].dom.extent.value))
+            axes = cfg['split_%s' % a[i + n - m]].apply(sch, comp, a[i + n - m])
+            outers += list(axes)[:-1]
+            inners += [axes[-1]]
+
+    tensorized = []
+    to_reorder = []
+    define_split(comp.op.axis, stencil.op.axis, to_reorder, tensorized)
+    define_split(comp.op.reduce_axis, stencil.op.reduce_axis, to_reorder, tensorized)
+
+    cfg.define_reorder('reorder', to_reorder, policy='all')
+    sch[comp].reorder(*([to_reorder[i] for i in cfg['reorder'].perm] + tensorized))
+
+    sch[comp].pragma(tensorized[0], pragma)
+
+    return sch, args
+
+
 def preprocessor(a, stencil):
     """ If compute node `a` can be tensorized, return the tuple of
         (schedule, outer loops, inner loops). O.w. return None. """
