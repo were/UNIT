@@ -27,9 +27,7 @@ print(task.config_space)
 
 tuner = autotvm.tuner.XGBTuner(task)
 
-measure_option = autotvm.measure_option(
-    builder='local',
-    runner=autotvm.LocalRunner(number=5))
+measure_option = autotvm.measure_option(builder='local', runner=autotvm.LocalRunner(number=5))
 
 import logging, sys
 

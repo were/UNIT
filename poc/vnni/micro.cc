@@ -61,11 +61,13 @@ int main() {
 
   begin_roi();
   kernel();
-  end_roi();
+  uint64_t ellapse = end_roi();
 
-  for (int i = 0; i < 16; ++i) {
-    std::cout << d[i] << std::endl;
-  }
+  double gops = (double)(5ll) / (ellapse / 1e6);
+
+  std::cout.precision(4);
+  std::cout << "Time Ellapse: " << ellapse / 1e6 << std::endl;
+  std::cout << "Peak GVNNI/s: " << gops << std::endl;
 
   return 0;
 

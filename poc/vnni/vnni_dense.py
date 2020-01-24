@@ -48,6 +48,7 @@ sch[cached_a].vectorize(fused)
 
 print(tvm.lower(sch, [a, b, c], simple_mode=True))
 
+
 import vnni
 with tvm.build_config(add_lower_pass= [(1, vnni.vnni_transformation)]):
 
