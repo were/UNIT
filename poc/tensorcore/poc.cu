@@ -1,73 +1,67 @@
-#include <sys/time.h>
-#include <cassert>
+
+#include <assert.h>
 #include <iostream>
-#include <cuda_fp16.h>
 #include <cuda.h>
 #include <mma.h>
-#include <cuda_runtime_api.h>
+#include <cuda_fp16.h>
+
+#define N 16
+#define M 16
+#define K 16
 
 using namespace nvcuda;
 
+__global__ void foo(half *a, half *b, float *c) {
+   //wmma::fragment<wmma::matrix_a, N, M, K, half, wmma::row_major> a_frag;
+   //wmma::fragment<wmma::matrix_b, N, M, K, half, wmma::row_major> b_frag;
+   wmma::fragment<wmma::accumulator, N, M, K, float> c_frag;
 
-struct timeval tv0, tv1;
+   wmma::fill_fragment(c_frag, 2.0f);
 
-void begin_roi() {
-  gettimeofday(&tv0, nullptr);
+   //wmma::load_matrix_sync(a_frag, a, M);
+   //wmma::load_matrix_sync(b_frag, b, K);
+   //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+
+   wmma::store_matrix_sync(c, c_frag, K, wmma::mem_row_major);
 }
 
-#define TV_TO_SEC(tv) (tv.tv_sec * 1000000 + tv.tv_usec)
-
-void end_roi() {
-  gettimeofday(&tv1, nullptr);
-  std::cout << TV_TO_SEC(tv1) - TV_TO_SEC(tv0) << std::endl;
-}
-
-extern "C" __global__ void default_function_kernel0( half* __restrict__ a,  half* __restrict__ b,  float* __restrict__ c) {
-
-  for (int x_outer_inner = 0; x_outer_inner < 4; ++x_outer_inner) {
-    for (int y_outer_inner = 0; y_outer_inner < 4; ++y_outer_inner) {
-
-      wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
-
-      wmma::fill_fragment(c_frag, 0.0f);
-
-      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
-      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
-
-
-      for (int rv_outer = 0; rv_outer < 256; ++rv_outer) {
-
-        half *ptr_a = &a[((((((int)blockIdx.x) * 262144) + (x_outer_inner * 65536)) + (rv_outer * 16)))];
-        wmma::load_matrix_sync(a_frag, ptr_a, 4096);
-        half *ptr_b = &b[((((((int)threadIdx.x) * 262144) + (y_outer_inner * 65536)) + (rv_outer * 16)))];
-        wmma::load_matrix_sync(b_frag, ptr_b, 4096);
-        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-
-      }
-      __syncthreads();
-
-      float *ptr_c = &c[((((((((int)blockIdx.x) * 262144) + (x_outer_inner * 65536))) + (((int)threadIdx.x) * 64)) + (y_outer_inner * 16)))];
-      wmma::store_matrix_sync(ptr_c, c_frag, 4096, wmma::mem_row_major);
-
-    }
-  }
-}
+half a[N * M], b[M * K];
+float c[N * K], ref[N * K];
 
 int main() {
+  cudaDeviceProp prop;
+  assert(cudaSuccess == cudaGetDeviceProperties(&prop, 0));
+  std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
 
-  half *a, *b;
-  float *c;
-
-  cudaMalloc(&a, 4096 * 4096 * (sizeof (half)));
-  cudaMalloc(&b, 4096 * 4096 * (sizeof (half)));
-  cudaMalloc(&c, 4096 * 4096 * (sizeof (float)));
-
-  begin_roi();
-  for (int i = 0; i < 10; ++i) {
-    default_function_kernel0<<<64, 64>>>(a, b, c);
+  for (int i = 0; i < N * M; ++i)
+    a[i] = __float2half(rand() % 3 + 1);
+  for (int i = 0; i < M * K; ++i)
+    b[i] = __float2half(rand() % 3 + 1);
+  for (int i = 0; i < N * K; ++i)
+    c[i] = 0;
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < K; ++j) {
+      ref[i * K + j] = 0.0;
+      for (int k = 0; k < M; ++k)
+        ref[i * K + j] += __half2float(a[i * M + k]) * __half2float(b[k * K + j]);
+    }
+  half *dev_a, *dev_b;
+  float *dev_c;
+  cudaMalloc(&dev_a, N * M * sizeof(half));
+  cudaMalloc(&dev_b, M * K * sizeof(half));
+  cudaMalloc(&dev_c, N * K * sizeof(float));
+  cudaMemcpy(dev_a, a, sizeof a, cudaMemcpyHostToDevice);
+  cudaMemcpy(dev_b, b, sizeof b, cudaMemcpyHostToDevice);
+  cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
+  foo<<<1, 1>>>(dev_a, dev_b, dev_c);
+  cudaDeviceSynchronize();
+  cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < K; ++j) {
+      if (j) std::cout << " ";
+      std::cout << c[i * K + j];// << "(" << ref[i * K + j] << ")";
+    }
+    std::cout << std::endl;
   }
-  assert(cudaDeviceSynchronize() == cudaSuccess);
-  end_roi();
-
   return 0;
 }
