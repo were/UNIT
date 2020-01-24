@@ -22,17 +22,21 @@ int main() {
 
   {
     begin_roi();
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 10; ++i) {
       mkldnn_status_t status = mkldnn_gemm_s8s8s32('N', 'T', 'F', n, m, k, 1.0,
                                       a, k, 0, b, k, 0, 0.0,
                                       c, m, &co);
       assert(status == mkldnn_success);
     }
     float res = end_roi();
-    float gvnnis = (float) n * m * k / 64.f / res / 10.0;
+    float gvnnis = ((float) n * m * k / 64.f * 10.0 / res) / 1000.;
     printf("Execution time: %.5f\n", res / 100. / 1000000.);
-    printf("%.2f GVNNI/s\n", gvnnis / 8 * 7);
+    printf("%.2f GVNNI/us\n", gvnnis);
   }
+
+  delete[] a;
+  delete[] b;
+  delete[] c;
 
   return 0;
 }

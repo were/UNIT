@@ -1,73 +1,89 @@
-#include <sys/time.h>
-#include <cassert>
+#include <assert.h>
 #include <iostream>
-#include <cuda_fp16.h>
 #include <cuda.h>
 #include <mma.h>
-#include <cuda_runtime_api.h>
+#include <cuda_fp16.h>
+
+#define N 32
+#define M 32
+#define K 32
 
 using namespace nvcuda;
 
+__global__ void foo(half *a, half *b, float *c) {
+  int block_x = blockIdx.x / 2;
+  int block_y = blockIdx.x % 2;
 
-struct timeval tv0, tv1;
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag;
+  wmma::fill_fragment(c_frag, 0.0f);
 
-void begin_roi() {
-  gettimeofday(&tv0, nullptr);
+  for (int k = 0; k < M; k += 16) {
+    wmma::load_matrix_sync(a_frag, a + M * block_x + k, M);
+    wmma::load_matrix_sync(b_frag, b + K * k + block_y * 16, K);
+    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+  }
+
+  wmma::store_matrix_sync(c + K * block_x * 16 + block_y * 16, c_frag, K, wmma::mem_row_major);
 }
 
-#define TV_TO_SEC(tv) (tv.tv_sec * 1000000 + tv.tv_usec)
+half a[N * M], b[M * K];
+float c[N * K], ref[N * K];
 
-void end_roi() {
-  gettimeofday(&tv1, nullptr);
-  std::cout << TV_TO_SEC(tv1) - TV_TO_SEC(tv0) << std::endl;
-}
-
-extern "C" __global__ void default_function_kernel0( half* __restrict__ a,  half* __restrict__ b,  float* __restrict__ c) {
-
-  for (int x_outer_inner = 0; x_outer_inner < 4; ++x_outer_inner) {
-    for (int y_outer_inner = 0; y_outer_inner < 4; ++y_outer_inner) {
-
-      wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
-
-      wmma::fill_fragment(c_frag, 0.0f);
-
-      wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
-      wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
-
-
-      for (int rv_outer = 0; rv_outer < 256; ++rv_outer) {
-
-        half *ptr_a = &a[((((((int)blockIdx.x) * 262144) + (x_outer_inner * 65536)) + (rv_outer * 16)))];
-        wmma::load_matrix_sync(a_frag, ptr_a, 4096);
-        half *ptr_b = &b[((((((int)threadIdx.x) * 262144) + (y_outer_inner * 65536)) + (rv_outer * 16)))];
-        wmma::load_matrix_sync(b_frag, ptr_b, 4096);
-        wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-
-      }
-      __syncthreads();
-
-      float *ptr_c = &c[((((((((int)blockIdx.x) * 262144) + (x_outer_inner * 65536))) + (((int)threadIdx.x) * 64)) + (y_outer_inner * 16)))];
-      wmma::store_matrix_sync(ptr_c, c_frag, 4096, wmma::mem_row_major);
-
+template<typename T>
+void print(int n, int m, const T* a) {
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < m; ++j) {
+      if (j) std::cout << " ";
+      std::cout << a[i * m + j];
     }
+    std::cout << std::endl;
+  }
+}
+
+template<>
+void print(int n, int m, const half* a) {
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < m; ++j) {
+      if (j) std::cout << " ";
+      std::cout << __half2float(a[i * m + j]);
+    }
+    std::cout << std::endl;
   }
 }
 
 int main() {
+  cudaDeviceProp prop;
+  assert(cudaSuccess == cudaGetDeviceProperties(&prop, 0));
+  std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
 
-  half *a, *b;
-  float *c;
-
-  cudaMalloc(&a, 4096 * 4096 * (sizeof (half)));
-  cudaMalloc(&b, 4096 * 4096 * (sizeof (half)));
-  cudaMalloc(&c, 4096 * 4096 * (sizeof (float)));
-
-  begin_roi();
-  for (int i = 0; i < 10; ++i) {
-    default_function_kernel0<<<64, 64>>>(a, b, c);
-  }
-  assert(cudaDeviceSynchronize() == cudaSuccess);
-  end_roi();
-
+  for (int i = 0; i < N * M; ++i)
+    a[i] = __float2half((float )rand() / RAND_MAX * 0.5);
+  for (int i = 0; i < M * K; ++i)
+    b[i] = __float2half((float) rand() / RAND_MAX * 0.5);
+  for (int i = 0; i < N * K; ++i)
+    c[i] = 0;
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < K; ++j) {
+      ref[i * K + j] = 0.0;
+      for (int k = 0; k < M; ++k)
+        ref[i * K + j] += __half2float(a[i * M + k]) * __half2float(b[k * K + j]);
+    }
+  half *dev_a, *dev_b;
+  float *dev_c;
+  cudaMalloc(&dev_a, N * M * sizeof(half));
+  cudaMalloc(&dev_b, M * K * sizeof(half));
+  cudaMalloc(&dev_c, N * K * sizeof(float));
+  cudaMemcpy(dev_a, a, sizeof a, cudaMemcpyHostToDevice);
+  cudaMemcpy(dev_b, b, sizeof b, cudaMemcpyHostToDevice);
+  cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
+  foo<<<4, 32>>>(dev_a, dev_b, dev_c);
+  cudaDeviceSynchronize();
+  cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
+  std::cout.precision(1);
+  std::cout << std::fixed;
+  //print(N, M, a);
+  print(N, K, c);
   return 0;
 }
