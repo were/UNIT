@@ -282,8 +282,11 @@ void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw) {
 int main(int argc, char **argv) {
     try {
         const int batch = 1;
-        const int ic = 64, h = 128, w = 128;
-        const int oc = 64, kh = 3, kw = 3;
+
+        int ic = 64, h = 128, w = 128;
+        int oc = 64, kh = 3, kw = 3;
+        std::cin >> h >> w >> ic;
+        std::cin >> kh >> kw >> oc;
 
         simple_net_int8(batch, ic, h, w, oc, kh, kw);
         simple_net_int8(batch, ic, h, w, oc, kh, kw);

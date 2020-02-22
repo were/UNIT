@@ -1,7 +1,7 @@
 import tvm
 
 def as_const_int(expr):
-    if isinstance(expr, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+    if isinstance(expr, (tvm.expr.IntImm, )):
         return expr.value
     return None
 
@@ -24,7 +24,7 @@ def vnni_transformation(stmt):
             outer_loops.pop()
             if to_vectorize:
                 if str(op.loop_var) == f'{to_vectorize[-1]}.init':
-                    return tvm.make.For(op.loop_var, op.min, op.extent, tvm.stmt.For.Vectorized,
+                    return tvm.tir.For(op.loop_var, op.min, op.extent, tvm.stmt.For.Vectorized,
                                         op.device_api, op.body)
                 elif str(op.loop_var) == str(to_vectorize[-1]):
                     loops = []
@@ -65,7 +65,7 @@ def vnni_transformation(stmt):
                         assert inner_stride is not None and outer_stride is not None
 
                         if tvm.ir_pass.Equal(elem.buffer_var, store[0].buffer_var):
-                            index = tvm.make.Ramp(base_index, tvm.const(1, 'int32'), 16)
+                            index = tvm.tir.Ramp(base_index, tvm.const(1, 'int32'), 16)
                             continue
 
                         indeces = []
@@ -73,16 +73,16 @@ def vnni_transformation(stmt):
                             for j in range(inner_ext):
                                 indeces.append(i * outer_stride + j * inner_stride)
                         bound = max(indeces) + 1
-                        to_load = tvm.make.Ramp(base_index, tvm.const(1, 'int32'), bound)
-                        value = tvm.make.Load(elem.dtype + 'x%d' % bound, elem.buffer_var, to_load,
+                        to_load = tvm.tir.Ramp(base_index, tvm.const(1, 'int32'), bound)
+                        value = tvm.tir.Load(elem.dtype + 'x%d' % bound, elem.buffer_var, to_load,
                                               tvm.const(1, 'int32x%d' % bound))
                         assert 64 % bound == 0
 
-                        operands.append(tvm.make.Shuffle([value] * (64 // bound), [tvm.const(i, 'int32') for i in indeces]))
+                        operands.append(tvm.tir.Shuffle([value] * (64 // bound), [tvm.const(i, 'int32') for i in indeces]))
 
                     buffer_var = store[0].buffer_var
 
-                    operands = [tvm.make.Load('int32x16', buffer_var, index, tvm.const(1, 'int32x16'))] + operands
+                    operands = [tvm.tir.Load('int32x16', buffer_var, index, tvm.const(1, 'int32x16'))] + operands
 
                     operands = [tvm.call_pure_intrin('int32x16', 'reinterpret', i) for i in operands]
 
@@ -90,9 +90,9 @@ def vnni_transformation(stmt):
                                                tvm.const(0, 'uint32'),
                                                *operands)
 
-                    res = tvm.make.Store(buffer_var, res, index, tvm.const(1, 'int32x16'))
+                    res = tvm.tir.Store(buffer_var, res, index, tvm.const(1, 'int32x16'))
                     if guard[0] is not None:
-                        res = tvm.make.IfThenElse(guard[0].condition, res, None)
+                        res = tvm.tir.IfThenElse(guard[0].condition, res, None)
                     return res
         elif isinstance(op, tvm.stmt.AttrStmt):
             if not to_vectorize:

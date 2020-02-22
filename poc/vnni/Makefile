@@ -6,8 +6,8 @@ poc.exe gemm.exe: %.exe: %.cu
 
 mkldnn_conv.out mkldnn_gemm.out: %.out: %.cc
 	clang++ $^ -std=c++11 -march=cascadelake -o $@ -O3 \
-	  -I$(MKLDNN)/include -I../../mkl-dnn/build/include \
-	  -L$(MKLDNN)/build/src -lmkldnn -lm -lpthread -lz
+	  -I../../../mkl-dnn/include -I../../../mkl-dnn/build/include \
+	  -L../../../mkl-dnn/build/src -lmkldnn -lm -lpthread -lz
 
 clean:
 	rm -f *.out *.ll main poc *.exe *.s *.o
