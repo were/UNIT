@@ -1,4 +1,6 @@
 import tvm
+from tvm import te
+from tvm import tir
 from . import util
 
 def customized_pass(stmt):
@@ -7,10 +9,10 @@ def customized_pass(stmt):
     outer_loops = []
 
     def add_loop_level(op):
-        if isinstance(op, tvm.stmt.AttrStmt):
-            if op.attr_key == 'pragma_vnni':
+        if isinstance(op, tir.AttrStmt):
+            if op.attr_key == 'pragma_tensorize':
                 to_vectorize.append(op.node.var)
-        elif isinstance(op, tvm.stmt.For):
+        elif isinstance(op, tir.For):
             outer_loops.append(op)
         return None
 
@@ -103,11 +105,12 @@ def customized_pass(stmt):
 
 def pattern():
     """ Define the stencil of VNNI. """
-    a = tvm.placeholder((64, ), dtype='int8', name='a')
-    b = tvm.placeholder((64, ), dtype='int8', name='b')
-    red = tvm.reduce_axis((0, 4), name='red')
-    c = tvm.compute((16, ),
-            lambda x: tvm.sum(a[x * 4 + red].astype('int32') * b[x * 4 + red].astype('int32'),
-                              axis=red),
-            name='b')
-    return c
+    a = te.placeholder((64, ), dtype='int8', name='a')
+    b = te.placeholder((64, ), dtype='int8', name='b')
+    red = te.reduce_axis((0, 4), name='red')
+    c = te.compute((16, ),
+            lambda x: te.sum(a[x * 4 + red].astype('int32') * b[x * 4 + red].astype('int32'),
+                             axis=red),
+            name='c')
+    sch = te.create_schedule(c.op)
+    return sch, [a, b], tvm.driver.build_module.get_binds([a, b])[0]
