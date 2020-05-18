@@ -62,19 +62,36 @@ def _coalesce_memory(dtype, buffer_var, index, axis):
     assert list(coef)
     x = 0
     base_dict = {}
-    while x < len(coef) and isinstance(coef[x], tvm.tir.IntImm) and coef[x].value == 0:
+    while x < len(axis) and isinstance(coef[x], tvm.tir.IntImm) and coef[x].value == 0:
         base_dict[axis[x][0]] = tvm.tir.IntImm('int32', 0)
         x += 1
     base_dict[axis[x][0]] = tvm.tir.IntImm('int32', 0)
-    dtype = dtype + ('x%d' % axis[x][2])
     ramps = []
+    
+    stride = coef[x]
+    trips = axis[x][2]
+
+    if isinstance(stride, tvm.tir.IntImm):
+        y = x + 1
+        print(x, y, len(coef), len(axis))
+        while y < len(axis) and isinstance(coef[y], tvm.tir.IntImm) and coef[y].value == stride.value * trips:
+            trips *= axis[y][2]
+            base_dict[axis[y][0]] = tvm.tir.IntImm('int32', 0)
+            y += 1
+        if y == len(axis):
+            base_index = tvm.tir.stmt_functor.substitute(index, base_dict)
+            ramp = tvm.tir.Ramp(base_index, stride, trips)
+            dtype = dtype + ('x%d' % trips)
+            return [tvm.tir.Load(dtype, buffer_var, ramp)]
+
+    dtype = dtype + ('x%d' % trips)
 
     # TODO(were): Ramp only
-    for i in _iter_axis_dom(axis[x+1:]):
+    for i in _iter_axis_dom(axis[y:]):
         m = base_dict.copy()
         m.update(i)
         base_index = tvm.tir.stmt_functor.substitute(index, m)
-        ramp = tvm.tir.Ramp(base_index, coef[x], axis[x][2])
+        ramp = tvm.tir.Ramp(base_index, stride, trips)
         ramp = tvm.arith.Analyzer().canonical_simplify(ramp)
         ramps.append(tvm.tir.Load(dtype, buffer_var, ramp))
     return ramps
@@ -91,14 +108,13 @@ def prepare_operand(stmt):
 
     def visitor(op):
         if isinstance(op, tvm.tir.Load):
+            print(op)
             ramps = _coalesce_memory(op.dtype, op.buffer_var, op.index, axis)
             total = len(ramps) * _parse_lanes(ramps[0].dtype)
-            if len(ramps) != 1:
-                ramps = tvm.tir.Shuffle(ramps, list(range(total)))
-            else:
-                ramps = ramps[0]
+            ramps = tvm.tir.Shuffle(ramps, list(range(total))) if len(ramps) != 1 else ramps[0]
             res.append(ramps)
         if isinstance(op, tvm.tir.Store):
+            print(op)
             ramps = _coalesce_memory(op.value.dtype, op.buffer_var, op.index, axis)
             assert len(ramps) == 1
             res.append(ramps[0])
@@ -129,11 +145,14 @@ def rewrite(f, mod, ctx):
                     a = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', a)
                     b = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', b)
                     c = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', c)
-                    #print(a.dtype, b.dtype, c.dtype)
                     vnni = tvm.tir.call_llvm_intrin('int32x16', 'llvm.x86.avx512.vpdpbusd.512',
                                                     tvm.tir.const(0, 'uint32'), a, b, c)
                     return tvm.tir.Store(buffer_var, vnni, operands[0].index)
                 else:
+                    operands = prepare_operand(op)
+                    value = operands[0]
+                    return tvm.tir.Store(value.buffer_var, tvm.tir.const(0, value.dtype), value.index)
+                    print(operands)
                     is_init[0] = False
         return None
     
