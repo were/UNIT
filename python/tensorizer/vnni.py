@@ -112,5 +112,6 @@ def pattern():
             lambda x: te.sum(a[x * 4 + red].astype('int32') * b[x * 4 + red].astype('int32'),
                              axis=red),
             name='c')
+    return c.op
     sch = te.create_schedule(c.op)
     return sch, [a, b], tvm.driver.build_module.get_binds([a, b])[0]

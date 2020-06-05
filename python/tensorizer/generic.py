@@ -4,6 +4,7 @@ def unroller(stmt):
     axis_dom = []
 
     def visitor(op):
+        nonlocal axis_dom
         if isinstance(op, tvm.tir.For):
             assert isinstance(op.min, tvm.tir.IntImm)
             assert isinstance(op.extent, tvm.tir.IntImm)
@@ -73,7 +74,6 @@ def _coalesce_memory(dtype, buffer_var, index, axis):
 
     if isinstance(stride, tvm.tir.IntImm):
         y = x + 1
-        print(x, y, len(coef), len(axis))
         while y < len(axis) and isinstance(coef[y], tvm.tir.IntImm) and coef[y].value == stride.value * trips:
             trips *= axis[y][2]
             base_dict[axis[y][0]] = tvm.tir.IntImm('int32', 0)
@@ -108,13 +108,11 @@ def prepare_operand(stmt):
 
     def visitor(op):
         if isinstance(op, tvm.tir.Load):
-            print(op)
             ramps = _coalesce_memory(op.dtype, op.buffer_var, op.index, axis)
             total = len(ramps) * _parse_lanes(ramps[0].dtype)
             ramps = tvm.tir.Shuffle(ramps, list(range(total))) if len(ramps) != 1 else ramps[0]
             res.append(ramps)
         if isinstance(op, tvm.tir.Store):
-            print(op)
             ramps = _coalesce_memory(op.value.dtype, op.buffer_var, op.index, axis)
             assert len(ramps) == 1
             res.append(ramps[0])
@@ -125,9 +123,9 @@ def prepare_operand(stmt):
 
 @tvm.tir.transform.prim_func_pass(opt_level=0)
 def rewrite(f, mod, ctx):
-
     is_init = [False]
     stmt = f.body
+    print(stmt)
 
     def detector(op):
         nonlocal is_init
@@ -152,9 +150,37 @@ def rewrite(f, mod, ctx):
                     operands = prepare_operand(op)
                     value = operands[0]
                     return tvm.tir.Store(value.buffer_var, tvm.tir.const(0, value.dtype), value.index)
-                    print(operands)
                     is_init[0] = False
         return None
     
-    #return tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt'])
-    return f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
+    res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
+    return res
+
+def analyze(op, stencil):
+    info = list(tvm.arith._ffi_api.MatchTensorizer(op, stencil))
+    res = {}
+    for i, j in zip(info[::2], info[1::2]):
+        res[i] = j
+    return res
+
+def apply(op, loops, pragma):
+    sch = tvm.te.create_schedule(op)
+
+    axis = list(op.axis)
+    reduce_axis = list(op.reduce_axis)
+    inners = []
+
+    def process(axis):
+        for i in range(len(axis)):
+            if axis[i] in loops.keys():
+                outer, inner = sch[op].split(axis[i], loops[axis[i]].dom.extent.value)
+                inners.append(inner)
+                axis[i] = outer
+    
+    process(axis)
+    process(reduce_axis)
+
+    sch[op].reorder(*(axis + reduce_axis + inners))
+    sch[op].pragma(inners[0], 'tensorize', pragma)
+
+    return sch
