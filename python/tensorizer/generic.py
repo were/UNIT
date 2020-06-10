@@ -143,7 +143,9 @@ def rewrite(f, mod, ctx):
                     a = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', a)
                     b = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', b)
                     c = tvm.tir.call_pure_intrin('int32x16', 'reinterpret', c)
-                    vnni = tvm.tir.call_llvm_intrin('int32x16', 'llvm.x86.avx512.vpdpbusd.512',
+                    from .intrinsics import INTRINSICS
+                    intrin_string = INTRINSICS[str(op.key)]['call']
+                    vnni = tvm.tir.call_llvm_intrin('int32x16', intrin_string,
                                                     tvm.tir.const(0, 'uint32'), a, b, c)
                     return tvm.tir.Store(buffer_var, vnni, operands[0].index)
                 else:
@@ -176,7 +178,7 @@ def apply(op, loops, pragma):
                 outer, inner = sch[op].split(axis[i], loops[axis[i]].dom.extent.value)
                 inners.append(inner)
                 axis[i] = outer
-    
+
     process(axis)
     process(reduce_axis)
 

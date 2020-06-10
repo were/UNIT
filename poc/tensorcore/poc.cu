@@ -12,15 +12,15 @@
 using namespace nvcuda;
 
 __global__ void foo(half *a, half *b, float *c) {
-   //wmma::fragment<wmma::matrix_a, N, M, K, half, wmma::row_major> a_frag;
-   //wmma::fragment<wmma::matrix_b, N, M, K, half, wmma::row_major> b_frag;
+   wmma::fragment<wmma::matrix_a, N, M, K, half, wmma::row_major> a_frag;
+   wmma::fragment<wmma::matrix_b, N, M, K, half, wmma::row_major> b_frag;
    wmma::fragment<wmma::accumulator, N, M, K, float> c_frag;
 
    wmma::fill_fragment(c_frag, 2.0f);
 
-   //wmma::load_matrix_sync(a_frag, a, M);
-   //wmma::load_matrix_sync(b_frag, b, K);
-   //wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+   wmma::load_matrix_sync(a_frag, a, M);
+   wmma::load_matrix_sync(b_frag, b, K);
+   wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
 
    wmma::store_matrix_sync(c, c_frag, K, wmma::mem_row_major);
 }
