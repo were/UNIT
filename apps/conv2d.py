@@ -22,7 +22,7 @@ x = tvm.te.placeholder((1, 4, 128, 128, 128), dtype='int8')
 w = tvm.te.placeholder((256, 4, 3, 3, 3), dtype='int8')
 y = topi.nn.conv3d_ncdhw(x, w, stride=1, padding=0, dilation=1, out_dtype='int32')
 
-info = tensorizer.analyze(y.op, tensorizer.vnni.pattern())
+info = tensorizer.analyze(y.op, tensorizer.INTRINSICS['vnni']['pattern'])
 sch = tensorizer.apply(y.op, info, 'vnni')
 
 with tvm.target.build_config(add_lower_pass=[(1, tensorizer.rewrite)]):
