@@ -64,7 +64,7 @@ def _index2ramps(index, axis, dtype=None):
 
     return ramps
 
-def _load_concatenator(load, axis, dtype=None):
+def _load_concatenator(load, axis, cast_type=None):
     ramps = _index2ramps(load.index, axis)
     assert 'x' not in load.dtype
     loads = []
@@ -76,9 +76,11 @@ def _load_concatenator(load, axis, dtype=None):
         loads.append(tvm.tir.Load(dtype, load.buffer_var, ramp))
     if len(loads) == 1:
         res = loads[0]
-    res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
-    if dtype is not None:
-        return tvm.tir.call_pure_intrin(dtype, 'reinterpret', res)
+    else:
+        res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
+    if cast_type is not None:
+        res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
+        print('!!!', res)
     return res
 
 def _vnni_write(store, axis, operands):
@@ -87,7 +89,9 @@ def _vnni_write(store, axis, operands):
     assert len(ramps) == 1
     llvm_intrin = 'llvm.x86.avx512.vpdpbusd.512'
     vnni = tvm.tir.call_llvm_intrin('int32x16', llvm_intrin,
-                                     tvm.tir.const(0, 'uint32'), *operands)
+                                     tvm.tir.const(0, 'uint32'),
+                                     tvm.tir.Load('int32x16', store.buffer_var, ramps),
+                                     *operands)
     return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
 def _vnni_init(store, axis):
@@ -97,14 +101,65 @@ def _vnni_init(store, axis):
     llvm_intrin = 'llvm.x86.avx512.vpdpbusd.512'
     return tvm.tir.Store(store.buffer_var, tvm.tir.const(0, 'int32x16'), ramps[0])
 
+def _schedule_vdot(outs, pattern, pragma):
+
+    from topi.util import traverse_inline
+    sch = tvm.te.create_schedule([i.op for i in outs])
+    output = outs[0].op
+
+    def callback(op):
+        if len(list(op.reduce_axis)):
+            info = list(tvm.arith._ffi_api.MatchTensorizer(op, pattern))
+            loops = {}
+            for i, j in zip(info[::2], info[1::2]):
+                loops[i] = j
+
+            axis = list(op.axis)
+            reduce_axis = list(op.reduce_axis)
+            inners = []
+            dom = {}
+
+            o_axis = list(output.axis)
+
+            for i in axis:
+                dom[i] = i.dom.extent.value
+            for i in reduce_axis:
+                dom[i] = i.dom.extent.value
+
+            def process(axis, is_reduce):
+                is_firstsplit = True
+                for i in range(len(axis)):
+                    if axis[i] in loops.keys():
+                        outer, inner = sch[op].split(axis[i], loops[axis[i]].dom.extent.value)
+                        inners.append(inner)
+                        dom[inner] = axis[i].dom.extent.value
+                        dom[outer] = axis[i].dom.extent.value // dom[inner]
+                        dom.pop(axis[i])
+                        axis[i] = outer
+
+                        #if is_firstsplit and not is_reduce:
+                        #    is_firstsplit = False
+                        #    outer, inner = sch[output].split(o_axis[i], loops[axis[i]].dom.extent.value)
+        
+            process(axis, False)
+            process(reduce_axis, True)
+
+            sch[op].reorder(*(axis + reduce_axis + inners))
+            sch[op].pragma(inners[0], 'tensorize', pragma)
+
+    traverse_inline(sch, output, callback)
+
+    return sch
+
 INTRINSICS = {
   'vnni': {
     'pattern': _vnni(),
     'operands': [
-        functools.partial(_load_concatenator, dtype='int32x16'),
-        functools.partial(_load_concatenator, dtype='int32x16')
+        functools.partial(_load_concatenator, cast_type='int32x16'),
+        functools.partial(_load_concatenator, cast_type='int32x16')
     ],
     'write': _vnni_write,
-    'init': _vnni_init
+    'init': _vnni_init,
+    'schedule': functools.partial(_schedule_vdot, pattern=_vnni(), pragma='vnni')
   },
 }

@@ -26,7 +26,10 @@ def alter(attrs, inputs, tinfos, out_type):
     new_attrs['data_layout'] = 'NHWC16c'
     new_attrs['kernel_layout'] = 'HWOI16o'
 
+#with tvm.target.build_config(add_lower_pass=[(1, tensorizer.rewrite)]), \
+#     relay.build_config(opt_level=3, disabled_pass=['AlterOpLayout']),  \
+#     tensorizer.AlterOpLayout('nn.conv2d', 'FTVMAlterOpLayout', alter):
+
 with tvm.target.build_config(add_lower_pass=[(1, tensorizer.rewrite)]), \
-     relay.build_config(opt_level=3, disabled_pass=['AlterOpLayout']),  \
-     tensorizer.AlterOpLayout('nn.conv2d', 'FTVMAlterOpLayout', alter):
+     relay.build_config(opt_level=3):
     graph, mod, params = tvm.relay.build(module, target='llvm -mcpu=cascadelake')
