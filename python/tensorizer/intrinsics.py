@@ -80,7 +80,6 @@ def _load_concatenator(load, axis, cast_type=None):
         res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
     if cast_type is not None:
         res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
-        print('!!!', res)
     return res
 
 def _vnni_write(store, axis, operands):
@@ -90,7 +89,6 @@ def _vnni_write(store, axis, operands):
     llvm_intrin = 'llvm.x86.avx512.vpdpbusd.512'
     vnni = tvm.tir.call_llvm_intrin('int32x16', llvm_intrin,
                                      tvm.tir.const(0, 'uint32'),
-                                     tvm.tir.Load('int32x16', store.buffer_var, ramps),
                                      *operands)
     return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
@@ -137,14 +135,31 @@ def _schedule_vdot(outs, pattern, pragma):
                         dom.pop(axis[i])
                         axis[i] = outer
 
-                        #if is_firstsplit and not is_reduce:
-                        #    is_firstsplit = False
-                        #    outer, inner = sch[output].split(o_axis[i], loops[axis[i]].dom.extent.value)
-        
+                        if is_firstsplit and not is_reduce:
+                            is_firstsplit = False
+                            prod = 1
+                            for j in range(i - 1, 0, -1):
+                                prod *= o_axis[j].dom.extent.value
+                                print(prod, o_axis[j])
+                                if prod > 1:
+                                    for k in range(9, 2, -1):
+                                        if o_axis[j].dom.extent.value % k == 0:
+                                            oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
+                                            sch[op].compute_at(sch[output], oj_outer_o)
+                                            #print(o_axis[:j], oj_outer_o, oj_outer_i)
+                                            fused = sch[output].fuse(*(o_axis[:j]))
+                                            sch[output].parallel(fused)
+                                            #sch[output].fuse(*(o_axis[:j]))
+                                            break
+                                    break
+                            #outer, inner = sch[output].split(o_axis[i], loops[axis[i]].dom.extent.value)
+
             process(axis, False)
             process(reduce_axis, True)
 
-            sch[op].reorder(*(axis + reduce_axis + inners))
+            sch[op].reorder(*(axis[:-2] + reduce_axis + axis[-2:] + inners))
+            sch[op].unroll(axis[-1])
+            sch[op].unroll(axis[-2])
             sch[op].pragma(inners[0], 'tensorize', pragma)
 
     traverse_inline(sch, output, callback)
@@ -155,6 +170,7 @@ INTRINSICS = {
   'vnni': {
     'pattern': _vnni(),
     'operands': [
+        functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16')
     ],
