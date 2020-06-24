@@ -4,7 +4,7 @@ import functools
 
 def _vnni():
     """ Define the stencil of VNNI. """
-    a = te.placeholder((64, ), dtype='int8', name='a')
+    a = te.placeholder((64, ), dtype='uint8', name='a')
     b = te.placeholder((64, ), dtype='int8', name='b')
     red = te.reduce_axis((0, 4), name='red')
     c = te.compute((16, ),
@@ -108,6 +108,7 @@ def _schedule_vdot(outs, pattern, pragma):
     def callback(op):
         if len(list(op.reduce_axis)):
             info = list(tvm.arith._ffi_api.MatchTensorizer(op, pattern))
+            assert info, op
             loops = {}
             for i, j in zip(info[::2], info[1::2]):
                 loops[i] = j

@@ -33,6 +33,8 @@ def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
 
+    print(stmt)
+
     def detector(op):
         nonlocal is_init
         if isinstance(op, tvm.tir.For):
@@ -60,7 +62,6 @@ def rewrite(f, mod, ctx):
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
-    print(res)
     return res
 
 def analyze(op, stencil):
