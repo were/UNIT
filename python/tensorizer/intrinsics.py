@@ -143,17 +143,19 @@ def _schedule_vdot(outs, pattern, pragma):
                                 prod *= o_axis[j].dom.extent.value
                                 print(prod, o_axis[j])
                                 if prod > 1:
-                                    for k in range(9, 2, -1):
-                                        if o_axis[j].dom.extent.value % k == 0:
-                                            oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
-                                            sch[op].compute_at(sch[output], oj_outer_o)
-                                            #print(o_axis[:j], oj_outer_o, oj_outer_i)
-                                            fused = sch[output].fuse(*(o_axis[:j]))
-                                            sch[output].parallel(fused)
-                                            #sch[output].fuse(*(o_axis[:j]))
-                                            break
+                                    tiled = None
+                                    for k in range(8, 2, -1):
+                                        if tiled == None or \
+                                           o_axis[j].dom.extent.value % k < o_axis[j].dom.extent.value % tiled:
+                                            tiled = k
+                                    k = tiled
+                                    oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
+                                    sch[op].compute_at(sch[output], oj_outer_o)
+                                    #print(o_axis[:j], oj_outer_o, oj_outer_i)
+                                    fused = sch[output].fuse(*(o_axis[:j]))
+                                    sch[output].parallel(fused)
+                                    #sch[output].fuse(*(o_axis[:j]))
                                     break
-                            #outer, inner = sch[output].split(o_axis[i], loops[axis[i]].dom.extent.value)
 
             process(axis, False)
             process(reduce_axis, True)
