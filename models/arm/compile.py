@@ -36,8 +36,8 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-# target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2a,+dotprod'
-target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu'
+target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2-a,+dotprod+neon'
+# target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))
