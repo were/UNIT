@@ -36,7 +36,7 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2-a,+dotprod+neon'
+target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2a,+fullfp16,+fp-armv8,+dotprod,+crc,+crypto,+neon'
 # target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu'
 
 def load_model(symbol_file, param_file, logger=None):
