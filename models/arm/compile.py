@@ -37,7 +37,7 @@ import statistics
 
 
 # target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2a,+dotprod,+neon'
-target = 'llvm -device=arm_cpu -mtriple=aarch64-none-linux-gnu -mattr=+dotprod,+neon'
+target = 'llvm -device=arm_cpu -mtriple=aarch64-none-linux-gnu -mattr=+v8.2a,+dotprod,+neon'
 # target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu'
 
 def load_model(symbol_file, param_file, logger=None):
