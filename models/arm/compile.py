@@ -36,7 +36,8 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2a,+fullfp16,+fp-armv8,+dotprod,+crc,+crypto,+neon'
+# target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu -mattr=+v8.2a,+dotprod,+neon'
+target = 'llvm -device=arm_cpu -mtriple=aarch64-none-linux-gnu -mattr=+dotprod,+neon'
 # target = 'llvm -device=arm_cpu -target=aarch64-linux-gnu'
 
 def load_model(symbol_file, param_file, logger=None):
@@ -89,7 +90,8 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
         if bool(is_before):
             timing = time.time()
         else:
-            print('Executes: ', info.name, (time.time() - timing) * 1000)
+            pass
+            # print('Executes: ', info.name, (time.time() - timing) * 1000)
 
     print('Model Load!')
     import tensorizer
