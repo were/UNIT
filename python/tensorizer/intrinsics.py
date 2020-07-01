@@ -2,13 +2,14 @@ from tvm import te
 import tvm
 import functools
 
-def _vnni():
+def dots(out_lanes, reduce_lanes, a_dtype, b_dtype, out_dtype):
     """ Define the stencil of VNNI. """
-    a = te.placeholder((64, ), dtype='uint8', name='a')
-    b = te.placeholder((64, ), dtype='int8', name='b')
-    red = te.reduce_axis((0, 4), name='red')
-    c = te.compute((16, ),
-            lambda x: te.sum(a[x * 4 + red].astype('int32') * b[x * 4 + red].astype('int32'),
+    a = te.placeholder((reduce_lanes * out_lanes, ), dtype=a_dtype, name='a')
+    b = te.placeholder((reduce_lanes * out_lanes, ), dtype=b_dtype, name='b')
+    red = te.reduce_axis((0, reduce_lanes), name='red')
+    c = te.compute((out_lanes, ),
+            lambda x: te.sum(a[x * reduce_lanes + red].astype('int32') *
+                             b[x * reduce_lanes + red].astype(out_dtype),
                              axis=red),
             name='c')
     return c.op
@@ -92,12 +93,21 @@ def _vnni_write(store, axis, operands):
                                      *operands)
     return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
-def _vnni_init(store, axis):
+def _vec_init(store, axis, dtype, lanes):
     ramps = _index2ramps(store.index, axis)
     assert 'x' not in store.value.dtype
     assert len(ramps) == 1
-    llvm_intrin = 'llvm.x86.avx512.vpdpbusd.512'
-    return tvm.tir.Store(store.buffer_var, tvm.tir.const(0, 'int32x16'), ramps[0])
+    return tvm.tir.Store(store.buffer_var, tvm.tir.const(0, '%sx%d' % (dtype, lanes)), ramps[0])
+
+def _vdot_write(store, axis, operands):
+    ramps = _index2ramps(store.index, axis)
+    assert 'x' not in store.value.dtype
+    assert len(ramps) == 1
+    llvm_intrin = 'llvm.aarch64.neon.sdot.v4i32.v4i32'
+    vnni = tvm.tir.call_llvm_intrin('int32x4', llvm_intrin,
+                                     tvm.tir.const(0, 'uint32'),
+                                     *operands)
+    return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
 def _schedule_vdot(outs, pattern, pragma):
 
@@ -171,14 +181,27 @@ def _schedule_vdot(outs, pattern, pragma):
 
 INTRINSICS = {
   'vnni': {
-    'pattern': _vnni(),
+    'pattern': dots(16, 4, 'uint8', 'int8', 'int32'),
     'operands': [
         functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16')
     ],
     'write': _vnni_write,
-    'init': _vnni_init,
-    'schedule': functools.partial(_schedule_vdot, pattern=_vnni(), pragma='vnni')
+    'init': functools.partial(_vec_init, dtype='int32', lanes=16),
+    'schedule': functools.partial(_schedule_vdot, pattern=dots(16, 4, 'uint8', 'int8', 'int32'),
+                                  pragma='vnni')
   },
+  'vdot': {
+      'pattern': dots(4, 4, 'int8', 'int8', 'int32'),
+      'operands': [
+          functools.partial(_load_concatenator, cast_type='int32x16'),
+          functools.partial(_load_concatenator, cast_type='int8x16'),
+          functools.partial(_load_concatenator, cast_type='int8x16')
+      ],
+      'write': _vdot_write,
+      'init': functools.partial(_vec_init, dtype='int32', lanes=4),
+      'schedule': functools.partial(_schedule_vdot, pattern=dots(16, 4, 'int8', 'int8', 'int32'),
+                                    pragma='vdot')
+  }
 }
