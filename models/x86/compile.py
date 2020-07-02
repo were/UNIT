@@ -86,6 +86,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
     def tracer(module, info, is_before):
         global timing
         if bool(is_before):
+            print('Starts', info.name)
             timing = time.time()
         else:
             print('Executes: ', info.name, (time.time() - timing) * 1000)
