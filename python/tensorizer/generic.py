@@ -32,8 +32,7 @@ def _gather_memory_operations(stmt):
 def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
-
-    print(stmt)
+    #print(stmt)
 
     def detector(op):
         nonlocal is_init
@@ -62,6 +61,7 @@ def rewrite(f, mod, ctx):
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
+    print(res)
     return res
 
 def analyze(op, stencil):

@@ -1,6 +1,7 @@
 from tvm import te
 import tvm
 import functools
+import operator
 
 def dots(out_lanes, reduce_lanes, a_dtype, b_dtype, out_dtype):
     """ Define the stencil of VNNI. """
@@ -28,6 +29,7 @@ def _index2ramps(index, axis, dtype=None):
     stride = coef[x]
     trips = axis[x][2]
 
+    # coalesce dimension
     if isinstance(stride, tvm.tir.IntImm):
         y = x + 1
         while y < len(axis) and isinstance(coef[y], tvm.tir.IntImm) and coef[y].value == stride.value * trips:
@@ -37,6 +39,7 @@ def _index2ramps(index, axis, dtype=None):
         if y == len(axis):
             base_index = tvm.tir.stmt_functor.substitute(index, base_dict)
             ramp = tvm.tir.Ramp(base_index, stride, trips)
+            print('coal')
             return [ramp]
 
     def _iter_axis_dom(axis_dom):
@@ -54,7 +57,15 @@ def _index2ramps(index, axis, dtype=None):
         else:
             yield {}
 
-    # TODO(were): Ramp only
+    is_broadcast = True
+    for i in range(y, len(axis)):
+        if isinstance(coef[i], tvm.tir.IntImm) and coef[i].value == 0:
+            pass
+        else:
+            is_broadcast = False
+
+    cnt = 0
+    # TODO(@were): Ramp only
     for i in _iter_axis_dom(axis[y:]):
         m = base_dict.copy()
         m.update(i)
@@ -62,22 +73,49 @@ def _index2ramps(index, axis, dtype=None):
         ramp = tvm.tir.Ramp(base_index, stride, trips)
         ramp = tvm.arith.Analyzer().canonical_simplify(ramp)
         ramps.append(ramp)
+        cnt += 1
 
+    if is_broadcast and dtype is not None:
+        lanes = int(str(ramps[0].dtype).split('x')[1])
+        for i in [8, 16, 32, 64]:
+            if dtype.endswith(str(i)):
+                bits = i
+                dtype = dtype[:-len(str(i))]
+                break
+        total = bits * lanes
+        if (total & -total) != total or total > 64:
+            return ramps
+        return [ramps[0], '%s%d' % (dtype, total), cnt]
+    
     return ramps
 
 def _load_concatenator(load, axis, cast_type=None):
-    ramps = _index2ramps(load.index, axis)
+    print('analyzing', load)
+    ramps = _index2ramps(load.index, axis, load.dtype)
     assert 'x' not in load.dtype
     loads = []
     total_lanes = 0
+    print('#ramps:', len(ramps))
+    is_broadcast = False
+    if len(ramps) == 3 and isinstance(ramps[1], str) and isinstance(ramps[2], int):
+        is_broadcast = True
+        ri_cast = ramps[1]
+        br_lanes = ramps[2]
+        ramps = ramps[:1]
     for ramp in ramps:
         lanes = int(ramp.dtype.split('x')[1])
         dtype = load.dtype + 'x' + str(lanes)
         total_lanes += lanes
         loads.append(tvm.tir.Load(dtype, load.buffer_var, ramp))
-    if len(loads) == 1:
+    if is_broadcast:
+        assert len(loads) == 1
+        res = tvm.tir.call_pure_intrin(ri_cast, 'reinterpret', loads[0])
+        res = tvm.tir.Broadcast(res, br_lanes)
+    elif len(loads) == 1:
         res = loads[0]
     else:
+        print(len(loads))
+        print(total_lanes)
         res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
     if cast_type is not None:
         res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
@@ -103,13 +141,14 @@ def _vdot_write(store, axis, operands):
     ramps = _index2ramps(store.index, axis)
     assert 'x' not in store.value.dtype
     assert len(ramps) == 1
-    llvm_intrin = 'llvm.aarch64.neon.sdot.v4i32.v4i32'
-    vnni = tvm.tir.call_llvm_intrin('int32x4', llvm_intrin,
-                                     tvm.tir.const(0, 'uint32'),
+    llvm_intrin = 'llvm.aarch64.neon.sdot.v4i32.v16i8'
+    vdot = tvm.tir.call_llvm_intrin('int32x4', llvm_intrin,
+                                     tvm.tir.const(3, 'uint32'),
                                      *operands)
-    return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
+    print(vdot)
+    return tvm.tir.Store(store.buffer_var, vdot, ramps[0])
 
-def _schedule_vdot(outs, pattern, pragma):
+def _schedule_vdot(outs, pattern, pragma, max_threads):
 
     from topi.util import traverse_inline
     sch = tvm.te.create_schedule([i.op for i in outs])
@@ -161,14 +200,53 @@ def _schedule_vdot(outs, pattern, pragma):
                                     k = tiled
                                     oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
                                     sch[op].compute_at(sch[output], oj_outer_o)
-                                    #print(o_axis[:j], oj_outer_o, oj_outer_i)
-                                    fused = sch[output].fuse(*(o_axis[:j]))
+
+                                    #fused = sch[output].fuse(*(o_axis[:j]))
+                                    #sch[output].parallel(fused)
+
+                                    outer_prod = 1
+                                    to_fuse = []
+                                    for k in range(j):
+                                        if outer_prod * o_axis[k].dom.extent.value <= max_threads:
+                                            outer_prod *= o_axis[k].dom.extent.value
+                                            to_fuse.append(o_axis[k])
+                                            print('fuse: ', o_axis[k])
+                                        else:
+                                            if outer_prod * 2 > max_threads:
+                                                break
+                                            factor, ext = 2, o_axis[k].dom.extent.value
+                                            tiling = None
+                                            while factor < ext:
+                                                if outer_prod * (ext // factor) <= max_threads:
+                                                    if (tiling == None) or (ext % factor < ext % tiling):
+                                                        tiling = factor
+                                                factor += 1
+                                            oo, oi = sch[output].split(o_axis[k], tiling)
+                                            to_fuse.append(oo)
+                                            print('split: ', o_axis[k], 'by ', tiling)
+                                            break
+
+                                    fused = sch[output].fuse(*(to_fuse))
                                     sch[output].parallel(fused)
-                                    #sch[output].fuse(*(o_axis[:j]))
+                                    sch[output].vectorize(o_axis[-1])
+
+                                    #for k in range(j, 0, -1):
+                                    #    if functools.reduce(operator.mul, o_doms[:k]) <= max_threads:
+                                    #        fused = sch[output].fuse(*(o_axis[:k]))
+                                    #        sch[output].parallel(fused)
+                                    #        break
+
                                     break
 
             process(axis, False)
             process(reduce_axis, True)
+
+            print('reorder:')
+            print(axis[:-2])
+            print(reduce_axis)
+            print(axis[-2:])
+            print(inners)
+            print(op.body)
 
             sch[op].reorder(*(axis[:-2] + reduce_axis + axis[-2:] + inners))
             sch[op].unroll(axis[-1])
@@ -190,18 +268,18 @@ INTRINSICS = {
     'write': _vnni_write,
     'init': functools.partial(_vec_init, dtype='int32', lanes=16),
     'schedule': functools.partial(_schedule_vdot, pattern=dots(16, 4, 'uint8', 'int8', 'int32'),
-                                  pragma='vnni')
+                                  pragma='vnni', max_threads=10000)
   },
   'vdot': {
       'pattern': dots(4, 4, 'int8', 'int8', 'int32'),
       'operands': [
-          functools.partial(_load_concatenator, cast_type='int32x16'),
+          functools.partial(_load_concatenator, cast_type='int32x4'),
           functools.partial(_load_concatenator, cast_type='int8x16'),
           functools.partial(_load_concatenator, cast_type='int8x16')
       ],
       'write': _vdot_write,
       'init': functools.partial(_vec_init, dtype='int32', lanes=4),
-      'schedule': functools.partial(_schedule_vdot, pattern=dots(16, 4, 'int8', 'int8', 'int32'),
-                                    pragma='vdot')
+      'schedule': functools.partial(_schedule_vdot, pattern=dots(4, 4, 'int8', 'int8', 'int32'),
+                                    pragma='vdot', max_threads=10000)
   }
 }
