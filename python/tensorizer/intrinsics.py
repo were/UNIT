@@ -167,14 +167,19 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             inners = []
             dom = {}
 
-            o_axis = list(output.axis)
+            o_axis = list(output.axis) if str(op) != str(output) else axis
 
+            for i in o_axis:
+                dom[i] = i.dom.extent.value
             for i in axis:
                 dom[i] = i.dom.extent.value
             for i in reduce_axis:
                 dom[i] = i.dom.extent.value
 
+            to_unroll = None
+
             def process(axis, is_reduce):
+                nonlocal to_unroll, o_axis
                 is_firstsplit = True
                 for i in range(len(axis)):
                     if axis[i] in loops.keys():
@@ -187,11 +192,8 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
 
                         if is_firstsplit and not is_reduce:
                             is_firstsplit = False
-                            prod = 1
                             for j in range(i - 1, 0, -1):
-                                prod *= o_axis[j].dom.extent.value
-                                print(prod, o_axis[j])
-                                if prod > 1:
+                                if dom[o_axis[j]] > 1:
                                     tiled = None
                                     for k in range(8, 2, -1):
                                         if tiled == None or \
@@ -199,8 +201,20 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                                             tiled = k
                                     k = tiled
                                     oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
-                                    sch[op].compute_at(sch[output], oj_outer_o)
-
+                                    print('unroll @', j)
+                                    print('split ', o_axis[j], 'by', k, oj_outer_o, oj_outer_i)
+                                    dom[oj_outer_i] = k
+                                    dom[oj_outer_o] = dom[o_axis[j]] // k
+                                    if str(op) != str(output):
+                                        sch[op].compute_at(sch[output], oj_outer_o)
+                                        print('compute at this level')
+                                    else:
+                                        axis[j] = oj_outer_i
+                                        axis.insert(j, oj_outer_o)
+                                        print('redo the axis')
+                                        print(axis)
+                                        print(o_axis)
+                                    to_unroll = j
                                     #fused = sch[output].fuse(*(o_axis[:j]))
                                     #sch[output].parallel(fused)
 
@@ -228,7 +242,11 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
 
                                     fused = sch[output].fuse(*(to_fuse))
                                     sch[output].parallel(fused)
-                                    sch[output].vectorize(o_axis[-1])
+                                    if str(op) == str(output):
+                                        for i in range(len(to_fuse)):
+                                            axis.pop(0)
+                                        axis.insert(0, fused)
+                                    # sch[output].vectorize(o_axis[-1])
 
                                     #for k in range(j, 0, -1):
                                     #    if functools.reduce(operator.mul, o_doms[:k]) <= max_threads:
@@ -249,8 +267,11 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             print(op.body)
 
             sch[op].reorder(*(axis[:-2] + reduce_axis + axis[-2:] + inners))
-            sch[op].unroll(axis[-1])
-            sch[op].unroll(axis[-2])
+            assert to_unroll is not None
+            for j in axis[to_unroll:]:
+                sch[op].unroll(j)
+            #sch[op].unroll(axis[-1])
+            #sch[op].unroll(axis[-2])
             sch[op].pragma(inners[0], 'tensorize', pragma)
 
     traverse_inline(sch, output, callback)
