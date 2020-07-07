@@ -27,7 +27,6 @@ def _index2ramps(index, axis, dtype=None):
         if y == len(axis):
             base_index = tvm.tir.stmt_functor.substitute(index, base_dict)
             ramp = tvm.tir.Ramp(base_index, stride, trips)
-            print('coal')
             return [ramp]
 
     def _iter_axis_dom(axis_dom):
@@ -78,12 +77,10 @@ def _index2ramps(index, axis, dtype=None):
     return ramps
 
 def _load_concatenator(load, axis, cast_type=None):
-    print('analyzing', load)
     ramps = _index2ramps(load.index, axis, load.dtype)
     assert 'x' not in load.dtype
     loads = []
     total_lanes = 0
-    print('#ramps:', len(ramps))
     is_broadcast = False
     if len(ramps) == 3 and isinstance(ramps[1], str) and isinstance(ramps[2], int):
         is_broadcast = True
@@ -102,8 +99,6 @@ def _load_concatenator(load, axis, cast_type=None):
     elif len(loads) == 1:
         res = loads[0]
     else:
-        print(len(loads))
-        print(total_lanes)
         res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
     if cast_type is not None:
         res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
@@ -133,7 +128,6 @@ def _vdot_write(store, axis, operands):
     vdot = tvm.tir.call_llvm_intrin('int32x4', llvm_intrin,
                                      tvm.tir.const(3, 'uint32'),
                                      *operands)
-    print(vdot)
     return tvm.tir.Store(store.buffer_var, vdot, ramps[0])
 
 def _schedule_vdot(outs, pattern, pragma, max_threads):
@@ -149,7 +143,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             fobj = lambda x: -x[0] * max_threads * 2 + -x[1] * max_threads * 2 + x[2] + (x[3] if 2 <= x[3] <= 8 else -x[3]) * max_threads
             points.sort(key=fobj)
             to_apply = points[-1][-1]
-            print(fobj(points[-1]), points[-1])
             to_schedule = output
             is_stencil = False
             loops = []
@@ -202,7 +195,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
 
             unroll, stencil, simple, reduction = [], [], [], []
             for i, elem in enumerate(zip(annot, loops)):
-                print(elem)
                 hint, axis = elem
                 if unroll and hint is None:
                     unroll.append(axis)
@@ -221,7 +213,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             for i in unroll:
                 sch[op].unroll(i)
             sch[op].pragma(stencil[0], 'tensorize', pragma)
-            print('loop levels', simple, reduction, unroll, stencil, sep='\n')
             if str(op) != str(output):
                 sch[op].reorder(*(simple + reduction + unroll + stencil))
             else:
