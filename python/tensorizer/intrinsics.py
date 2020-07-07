@@ -1,19 +1,7 @@
-from tvm import te
-import tvm
+""" Tensorization code generation """
 import functools
-import operator
 
-def dots(out_lanes, reduce_lanes, a_dtype, b_dtype, out_dtype):
-    """ Define the stencil of VNNI. """
-    a = te.placeholder((reduce_lanes * out_lanes, ), dtype=a_dtype, name='a')
-    b = te.placeholder((reduce_lanes * out_lanes, ), dtype=b_dtype, name='b')
-    red = te.reduce_axis((0, reduce_lanes), name='red')
-    c = te.compute((out_lanes, ),
-            lambda x: te.sum(a[x * reduce_lanes + red].astype('int32') *
-                             b[x * reduce_lanes + red].astype(out_dtype),
-                             axis=red),
-            name='c')
-    return c.op
+import tvm
 
 def _index2ramps(index, axis, dtype=None):
     coef = tvm.arith.detect_linear_equation(index, [i[0] for i in axis])
@@ -25,7 +13,7 @@ def _index2ramps(index, axis, dtype=None):
         x += 1
     base_dict[axis[x][0]] = tvm.tir.IntImm('int32', 0)
     ramps = []
-    
+
     stride = coef[x]
     trips = axis[x][2]
 
@@ -156,131 +144,97 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
 
     def callback(op):
         if len(list(op.reduce_axis)):
-            info = list(tvm.arith._ffi_api.MatchTensorizer(op, pattern))
-            assert info, op
-            loops = {}
-            for i, j in zip(info[::2], info[1::2]):
-                loops[i] = j
+            from .analyzer import analyze_tiling
+            points = list(analyze_tiling(op, pattern))
+            fobj = lambda x: -x[0] * max_threads * 2 + -x[1] * max_threads * 2 + x[2] + (x[3] if 2 <= x[3] <= 8 else -x[3]) * max_threads
+            points.sort(key=fobj)
+            to_apply = points[-1][-1]
+            print(fobj(points[-1]), points[-1])
+            to_schedule = output
+            is_stencil = False
+            loops = []
+            for i in range(len(output.axis)):
+                to_split = to_schedule.axis[i]
+                if isinstance(to_apply[i], list):
+                    for j in to_apply[i][:-1]:
+                        if isinstance(j, int):
+                            outer, inner = sch[to_schedule].split(to_split, nparts=j)
+                            to_split = inner
+                        else:
+                            outer, inner = sch[to_schedule].split(to_split, nparts=j[0])
+                            to_split = inner
+                            if j[1] == 'parallel':
+                                if str(op) != str(output):
+                                    to_schedule = op
+                                    to_split = to_schedule.axis[i]
+                                    sch[op].compute_at(sch[output], outer)
+                        loops.append(outer)
+                loops.append(to_split)
 
-            axis = list(op.axis)
-            reduce_axis = list(op.reduce_axis)
-            inners = []
-            dom = {}
+            is_stencil = False
+            for i in range(len(op.reduce_axis)):
+                to_split = op.reduce_axis[i]
+                if isinstance(to_apply[i + len(op.axis)], list):
+                    for j in to_apply[i + len(op.axis)][:-1]:
+                        if isinstance(j, int):
+                            assert not is_stencil
+                            outer, inner = sch[op].split(to_split, nparts=j)
+                            to_split = inner
+                            loops.append(outer)
+                        else:
+                            outer, inner = sch[op].split(to_split, nparts=j[0])
+                            to_split = inner
+                            loops.append(outer)
+                loops.append(to_split)
 
-            o_axis = list(output.axis) if str(op) != str(output) else axis
+            annot = []
+            for i, elem in enumerate(to_apply):
+                if isinstance(elem, list):
+                    for j in elem:
+                        if isinstance(j, int):
+                            annot.append(None if i < len(op.axis) else 'reduce')
+                        else:
+                            annot.append(j[1])
+                else:
+                    annot.append(None)
+            assert len(annot) == len(loops), '%d != %d' % (len(annot), len(loops))
 
-            for i in o_axis:
-                dom[i] = i.dom.extent.value
-            for i in axis:
-                dom[i] = i.dom.extent.value
-            for i in reduce_axis:
-                dom[i] = i.dom.extent.value
 
-            to_unroll = None
-
-            def process(axis, is_reduce):
-                nonlocal to_unroll, o_axis
-                is_firstsplit = True
-                for i in range(len(axis)):
-                    if axis[i] in loops.keys():
-                        outer, inner = sch[op].split(axis[i], loops[axis[i]].dom.extent.value)
-                        inners.append(inner)
-                        dom[inner] = axis[i].dom.extent.value
-                        dom[outer] = axis[i].dom.extent.value // dom[inner]
-                        dom.pop(axis[i])
-                        axis[i] = outer
-
-                        if is_firstsplit and not is_reduce:
-                            is_firstsplit = False
-                            for j in range(i - 1, 0, -1):
-                                if dom[o_axis[j]] > 1:
-                                    tiled = None
-                                    for k in range(8, 2, -1):
-                                        if tiled == None or \
-                                           o_axis[j].dom.extent.value % k < o_axis[j].dom.extent.value % tiled:
-                                            tiled = k
-                                    k = tiled
-                                    oj_outer_o, oj_outer_i = sch[output].split(o_axis[j], k)
-                                    print('unroll @', j)
-                                    print('split ', o_axis[j], 'by', k, oj_outer_o, oj_outer_i)
-                                    dom[oj_outer_i] = k
-                                    dom[oj_outer_o] = dom[o_axis[j]] // k
-                                    if str(op) != str(output):
-                                        sch[op].compute_at(sch[output], oj_outer_o)
-                                        print('compute at this level')
-                                    else:
-                                        axis[j] = oj_outer_i
-                                        axis.insert(j, oj_outer_o)
-                                        print('redo the axis')
-                                        print(axis)
-                                        print(o_axis)
-                                    to_unroll = j
-                                    #fused = sch[output].fuse(*(o_axis[:j]))
-                                    #sch[output].parallel(fused)
-
-                                    outer_prod = 1
-                                    to_fuse = []
-                                    for k in range(j):
-                                        if outer_prod * o_axis[k].dom.extent.value <= max_threads:
-                                            outer_prod *= o_axis[k].dom.extent.value
-                                            to_fuse.append(o_axis[k])
-                                            print('fuse: ', o_axis[k])
-                                        else:
-                                            if outer_prod * 2 > max_threads:
-                                                break
-                                            factor, ext = 2, o_axis[k].dom.extent.value
-                                            tiling = None
-                                            while factor < ext:
-                                                if outer_prod * (ext // factor) <= max_threads:
-                                                    if (tiling == None) or (ext % factor < ext % tiling):
-                                                        tiling = factor
-                                                factor += 1
-                                            oo, oi = sch[output].split(o_axis[k], tiling)
-                                            to_fuse.append(oo)
-                                            print('split: ', o_axis[k], 'by ', tiling)
-                                            break
-
-                                    fused = sch[output].fuse(*(to_fuse))
-                                    sch[output].parallel(fused)
-                                    if str(op) == str(output):
-                                        for i in range(len(to_fuse)):
-                                            axis.pop(0)
-                                        axis.insert(0, fused)
-                                    # sch[output].vectorize(o_axis[-1])
-
-                                    #for k in range(j, 0, -1):
-                                    #    if functools.reduce(operator.mul, o_doms[:k]) <= max_threads:
-                                    #        fused = sch[output].fuse(*(o_axis[:k]))
-                                    #        sch[output].parallel(fused)
-                                    #        break
-
-                                    break
-
-            process(axis, False)
-            process(reduce_axis, True)
-
-            print('reorder:')
-            print(axis[:-2])
-            print(reduce_axis)
-            print(axis[-2:])
-            print(inners)
-            print(op.body)
-
-            sch[op].reorder(*(axis[:-2] + reduce_axis + axis[-2:] + inners))
-            assert to_unroll is not None
-            for j in axis[to_unroll:]:
-                sch[op].unroll(j)
-            #sch[op].unroll(axis[-1])
-            #sch[op].unroll(axis[-2])
-            sch[op].pragma(inners[0], 'tensorize', pragma)
+            unroll, stencil, simple, reduction = [], [], [], []
+            for i, elem in enumerate(zip(annot, loops)):
+                print(elem)
+                hint, axis = elem
+                if unroll and hint is None:
+                    unroll.append(axis)
+                elif hint == 'parallel':
+                    fusion = sch[output].fuse(*simple[:i+1])
+                    sch[output].parallel(fusion)
+                    simple = []
+                elif hint == 'unroll':
+                    unroll.append(axis)
+                elif hint == 'offload':
+                    stencil.append(axis)
+                elif hint == 'reduction':
+                    reduction.append(axis)
+                else:
+                    simple.append(axis)
+            for i in unroll:
+                sch[op].unroll(i)
+            sch[op].pragma(stencil[0], 'tensorize', pragma)
+            print('loop levels', simple, reduction, unroll, stencil, sep='\n')
+            if str(op) != str(output):
+                sch[op].reorder(*(simple + reduction + unroll + stencil))
+            else:
+                sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
 
     traverse_inline(sch, output, callback)
 
     return sch
 
+from .pattern import vector_dotprod
+
 INTRINSICS = {
   'vnni': {
-    'pattern': dots(16, 4, 'uint8', 'int8', 'int32'),
     'operands': [
         functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16'),
@@ -288,11 +242,11 @@ INTRINSICS = {
     ],
     'write': _vnni_write,
     'init': functools.partial(_vec_init, dtype='int32', lanes=16),
-    'schedule': functools.partial(_schedule_vdot, pattern=dots(16, 4, 'uint8', 'int8', 'int32'),
+    'schedule': functools.partial(_schedule_vdot,
+                                  pattern=vector_dotprod(16, 4, 'uint8', 'int8', 'int32'),
                                   pragma='vnni', max_threads=10000)
   },
   'vdot': {
-      'pattern': dots(4, 4, 'int8', 'int8', 'int32'),
       'operands': [
           functools.partial(_load_concatenator, cast_type='int32x4'),
           functools.partial(_load_concatenator, cast_type='int8x16'),
@@ -300,7 +254,8 @@ INTRINSICS = {
       ],
       'write': _vdot_write,
       'init': functools.partial(_vec_init, dtype='int32', lanes=4),
-      'schedule': functools.partial(_schedule_vdot, pattern=dots(4, 4, 'int8', 'int8', 'int32'),
+      'schedule': functools.partial(_schedule_vdot,
+                                    pattern=vector_dotprod(4, 4, 'int8', 'int8', 'int32'),
                                     pragma='vdot', max_threads=10000)
   }
 }
