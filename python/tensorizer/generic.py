@@ -28,10 +28,36 @@ def _gather_memory_operations(stmt):
     assert len(store) == 1
     return loads, store[0]
 
+def _gather_condition(stmt, axis):
+    cond = []
+    def visitor_gather_cond(op):
+        if isinstance(op, tvm.tir.IfThenElse):
+            cond.append(op.condition)
+            assert op.else_case is None
+    tvm.tir.stmt_functor.post_order_visit(stmt, visitor_gather_cond)
+
+    if not cond:
+        return cond
+
+    is_pred = [False]
+    def visitor_uses_var(op):
+        if isinstance(op, tvm.tir.Var):
+            for elem in axis:
+                if tvm.tir.analysis.expr_deep_equal(elem[0], op):
+                    is_pred[0] = True
+
+    for i in cond:
+        tvm.tir.stmt_functor.post_order_visit(i, visitor_uses_var)
+    assert not is_pred[0], "Predication not supported yet!"
+
+    return cond
+
+
 @tvm.tir.transform.prim_func_pass(opt_level=0)
 def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
+
     print(stmt)
 
     def detector(op):
@@ -43,25 +69,30 @@ def rewrite(f, mod, ctx):
         nonlocal is_init
         if isinstance(op, tvm.tir.AttrStmt):
             if op.attr_key == 'pragma_tensorize':
+                from .intrinsics import INTRINSICS
+                loads, store = _gather_memory_operations(op)
+                axis = _gather_loop_trip_counts(op)
+                cond = _gather_condition(op, axis)
+
                 if not is_init[0]:
-                    from .intrinsics import INTRINSICS
-                    loads, store = _gather_memory_operations(op)
-                    axis = _gather_loop_trip_counts(op)
                     encoded_operands = []
                     for i in zip(loads, INTRINSICS[op.value.value]['operands']):
                         encoded_operands.append(i[1](i[0], axis))
-                    return INTRINSICS[op.value.value]['write'](store, axis, encoded_operands)
+                    xform = INTRINSICS[op.value.value]['write'](store, axis, encoded_operands)
                 else:
-                    from .intrinsics import INTRINSICS
-                    loads, store = _gather_memory_operations(op)
-                    axis = _gather_loop_trip_counts(op)
-                    return INTRINSICS[op.value.value]['init'](store, axis)
-
                     is_init[0] = False
+                    xform = INTRINSICS[op.value.value]['init'](store, axis)
+                
+                for elem in cond:
+                    xform = tvm.tir.IfThenElse(elem, xform, None)
+                return xform
+
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
-    #print(res)
+
+    # print(res)
+
     return res
 
 def analyze(op, stencil):

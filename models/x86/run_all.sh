@@ -3,7 +3,7 @@ python3 run.py --symbol-file=models/inceptionv3-quantized.json --param-file=mode
 python3 run.py --symbol-file=models/mobilenet1.0-quantized.json --param-file=models/mobilenet1.0-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
 python3 run.py --symbol-file=models/mobilenetv2_1.0-quantized.json --param-file=models/mobilenetv2_1.0-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
 python3 run.py --symbol-file=models/resnet101_v1-quantized.json --param-file=models/resnet101_v1-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
-python3 run.py --symbol-file=models/resnet-152-quantized.json --param-file=models/resnet-152-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
+python3 run.py --symbol-file=models/imagenet1k-resnet-152-quantized.json --param-file=models/imagenet1k-resnet-152-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
 python3 run.py --symbol-file=models/resnet18_v1-quantized.json --param-file=models/resnet18_v1-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
 python3 run.py --symbol-file=models/resnet50_v1b-quantized.json --param-file=models/resnet50_v1b-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
 python3 run.py --symbol-file=models/resnet50_v1-quantized.json --param-file=models/resnet50_v1-quantized.params --image-shape=3,224,224 --ctx=cpu --num-inference-batches=5
