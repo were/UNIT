@@ -215,6 +215,7 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             sch[op].pragma(stencil[0], 'tensorize', pragma)
             if str(op) != str(output):
                 sch[op].reorder(*(simple + reduction + unroll + stencil))
+                sch[output].vectorize(output.axis[-1])
             else:
                 sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
 
