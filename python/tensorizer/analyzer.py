@@ -11,7 +11,7 @@ def _factors(x):
             res.append(x // i)
         if i * i > x:
             break
-    return [1, x] + sorted(res) if res else sorted(list(range(2, 9)), key=lambda v: x % v)
+    return [1, x] + sorted(res) if res else sorted(list(range(2, min(9, x + 1))), key=lambda v: x % v)
 
 def _ceil_div(a, b):
     return (a - 1) // b + 1

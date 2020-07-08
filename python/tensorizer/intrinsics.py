@@ -140,11 +140,13 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
         if len(list(op.reduce_axis)):
             from .analyzer import analyze_tiling
             points = list(analyze_tiling(op, pattern))
-            fobj = lambda x: -x[0] * max_threads * 2 + -x[1] * max_threads * 2 + x[2] + (x[3] if 2 <= x[3] <= 8 else -x[3]) * max_threads
+            fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else -x[3])
             points.sort(key=fobj)
+            for x in points[-5:]:
+                print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else -x[3]), x[-1], sep='\n')
             to_apply = points[-1][-1]
-            print(output.axis)
-            print(to_apply)
+            # print(output.axis)
+            # print(to_apply)
             to_schedule = output
             is_stencil = False
             loops = []
@@ -201,7 +203,7 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
 
             unroll, stencil, simple, reduction = [], [], [], []
             for i, elem in enumerate(zip(annot, loops)):
-                print(elem)
+                # print(elem)
                 hint, axis = elem
                 if unroll and hint is None:
                     unroll.append(axis)
@@ -221,7 +223,7 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                 sch[op].unroll(i)
             sch[op].pragma(stencil[0], 'tensorize', pragma)
             if str(op) != str(output):
-                print(simple, reduction, unroll, stencil, sep='\n')
+                # print(simple, reduction, unroll, stencil, sep='\n')
                 sch[op].reorder(*(simple + reduction + unroll + stencil))
             else:
                 sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
