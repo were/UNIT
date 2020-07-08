@@ -143,58 +143,65 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             fobj = lambda x: -x[0] * max_threads * 2 + -x[1] * max_threads * 2 + x[2] + (x[3] if 2 <= x[3] <= 8 else -x[3]) * max_threads
             points.sort(key=fobj)
             to_apply = points[-1][-1]
+            print(output.axis)
+            print(to_apply)
             to_schedule = output
             is_stencil = False
             loops = []
             for i in range(len(output.axis)):
-                to_split = to_schedule.axis[i]
-                if isinstance(to_apply[i], list):
-                    for j in to_apply[i][:-1]:
-                        if isinstance(j, int):
-                            outer, inner = sch[to_schedule].split(to_split, nparts=j)
-                            to_split = inner
-                        else:
-                            outer, inner = sch[to_schedule].split(to_split, nparts=j[0])
-                            to_split = inner
-                            if j[1] == 'parallel':
-                                if str(op) != str(output):
-                                    to_schedule = op
-                                    to_split = to_schedule.axis[i]
-                                    sch[op].compute_at(sch[output], outer)
-                        loops.append(outer)
-                loops.append(to_split)
 
-            is_stencil = False
+                if isinstance(to_apply[i][0], tuple) and to_apply[i][0][1] == 'parallel':
+                    to_schedule = op
+                    if str(op) != str(output):
+                        outer, inner = sch[output].split(output.axis[i], nparts=to_apply[i][0][0])
+                        sch[op].compute_at(sch[output], outer)
+                        if i == len(output.axis) - 1:
+                            sch[output].vectorize(inner)
+                        else:
+                            sch[output].vectorize(output.axis[-1])
+
+                to_append = []
+                to_split = to_schedule.axis[i]
+
+                for j in to_apply[i][1:][::-1]:
+                    if isinstance(j, int):
+                        outer, inner = sch[to_schedule].split(to_split, j)
+                        to_split = outer
+                    else:
+                        outer, inner = sch[to_schedule].split(to_split, j[0])
+                        to_split = outer
+
+                    to_append = [inner] + to_append
+                to_append = [to_split] + to_append
+                loops += to_append
+
             for i in range(len(op.reduce_axis)):
                 to_split = op.reduce_axis[i]
-                if isinstance(to_apply[i + len(op.axis)], list):
-                    for j in to_apply[i + len(op.axis)][:-1]:
-                        if isinstance(j, int):
-                            assert not is_stencil
-                            outer, inner = sch[op].split(to_split, nparts=j)
-                            to_split = inner
-                            loops.append(outer)
-                        else:
-                            outer, inner = sch[op].split(to_split, nparts=j[0])
-                            to_split = inner
-                            loops.append(outer)
-                loops.append(to_split)
+                to_append = []
+                for j in to_apply[i + len(op.axis)][1:][::-1]:
+                    if isinstance(j, int):
+                        outer, inner = sch[op].split(to_split, j)
+                        to_split = outer
+                    else:
+                        outer, inner = sch[op].split(to_split, j[0])
+                        to_split = outer
+                    to_append = [inner] + to_append
+                to_append = [to_split] + to_append
+                loops += to_append
 
             annot = []
             for i, elem in enumerate(to_apply):
-                if isinstance(elem, list):
-                    for j in elem:
-                        if isinstance(j, int):
-                            annot.append(None if i < len(op.axis) else 'reduce')
-                        else:
-                            annot.append(j[1])
-                else:
-                    annot.append(None)
+                for j in elem:
+                    if isinstance(j, int):
+                        annot.append(None if i < len(op.axis) else 'reduce')
+                    else:
+                        annot.append(j[1])
             assert len(annot) == len(loops), '%d != %d' % (len(annot), len(loops))
 
 
             unroll, stencil, simple, reduction = [], [], [], []
             for i, elem in enumerate(zip(annot, loops)):
+                print(elem)
                 hint, axis = elem
                 if unroll and hint is None:
                     unroll.append(axis)
@@ -214,8 +221,8 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                 sch[op].unroll(i)
             sch[op].pragma(stencil[0], 'tensorize', pragma)
             if str(op) != str(output):
+                print(simple, reduction, unroll, stencil, sep='\n')
                 sch[op].reorder(*(simple + reduction + unroll + stencil))
-                sch[output].vectorize(output.axis[-1])
             else:
                 sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
 
