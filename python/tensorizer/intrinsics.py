@@ -39,7 +39,6 @@ def _index2ramps(index, axis, dtype=None):
         if y == len(axis):
             base_index = tvm.tir.stmt_functor.substitute(index, base_dict)
             ramp = tvm.tir.Ramp(base_index, stride, trips)
-            print('coal')
             return [ramp]
 
     def _iter_axis_dom(axis_dom):
@@ -90,12 +89,10 @@ def _index2ramps(index, axis, dtype=None):
     return ramps
 
 def _load_concatenator(load, axis, cast_type=None):
-    print('analyzing', load)
     ramps = _index2ramps(load.index, axis, load.dtype)
     assert 'x' not in load.dtype
     loads = []
     total_lanes = 0
-    print('#ramps:', len(ramps))
     is_broadcast = False
     if len(ramps) == 3 and isinstance(ramps[1], str) and isinstance(ramps[2], int):
         is_broadcast = True
@@ -114,8 +111,6 @@ def _load_concatenator(load, axis, cast_type=None):
     elif len(loads) == 1:
         res = loads[0]
     else:
-        print(len(loads))
-        print(total_lanes)
         res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
     if cast_type is not None:
         res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
@@ -145,7 +140,6 @@ def _vdot_write(store, axis, operands):
     vdot = tvm.tir.call_llvm_intrin('int32x4', llvm_intrin,
                                      tvm.tir.const(3, 'uint32'),
                                      *operands)
-    print(vdot)
     return tvm.tir.Store(store.buffer_var, vdot, ramps[0])
 
 def _schedule_vdot(outs, pattern, pragma, max_threads):
@@ -190,7 +184,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                             prod = 1
                             for j in range(i - 1, 0, -1):
                                 prod *= o_axis[j].dom.extent.value
-                                print(prod, o_axis[j])
                                 if prod > 1:
                                     tiled = None
                                     for k in range(8, 2, -1):
@@ -210,7 +203,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                                         if outer_prod * o_axis[k].dom.extent.value <= max_threads:
                                             outer_prod *= o_axis[k].dom.extent.value
                                             to_fuse.append(o_axis[k])
-                                            print('fuse: ', o_axis[k])
                                         else:
                                             if outer_prod * 2 > max_threads:
                                                 break
@@ -223,7 +215,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                                                 factor += 1
                                             oo, oi = sch[output].split(o_axis[k], tiling)
                                             to_fuse.append(oo)
-                                            print('split: ', o_axis[k], 'by ', tiling)
                                             break
 
                                     fused = sch[output].fuse(*(to_fuse))
@@ -241,12 +232,6 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             process(axis, False)
             process(reduce_axis, True)
 
-            print('reorder:')
-            print(axis[:-2])
-            print(reduce_axis)
-            print(axis[-2:])
-            print(inners)
-            print(op.body)
 
             sch[op].reorder(*(axis[:-2] + reduce_axis + axis[-2:] + inners))
             sch[op].unroll(axis[-1])

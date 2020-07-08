@@ -87,6 +87,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
         global timing
         if bool(is_before):
             timing = time.time()
+            print('Starts: ', info.name)
         else:
             print('Executes: ', info.name, (time.time() - timing) * 1000)
 
