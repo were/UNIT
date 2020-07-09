@@ -4,6 +4,8 @@ import operator
 import tvm
 
 def _factors(x):
+    if x == 1:
+        return [1]
     res = []
     for i in range(2, x):
         if x % i == 0:
@@ -11,7 +13,7 @@ def _factors(x):
             res.append(x // i)
         if i * i > x:
             break
-    return [1, x] + sorted(res) if res else sorted(list(range(2, min(9, x + 1))), key=lambda v: x % v)
+    return sorted([1, x] + res) if res else sorted(list(range(2, min(9, x + 1))), key=lambda v: x % v)
 
 def _ceil_div(a, b):
     return (a - 1) // b + 1
@@ -49,7 +51,7 @@ def analyze_tiling(op, pattern, max_unroll=32, max_parallel=10000):
             fused_prod = functools.reduce(
                 operator.mul,
                 [j for i in copy_split[:parallel] for j in i if isinstance(j, int)],
-                1) * _ceil_div(copy_split[parallel][0], tile_parallel)
+                1)# * _ceil_div(copy_split[parallel][0], tile_parallel)
             if fused_prod > max_parallel:
                 continue
             copy_split[parallel] = [(_ceil_div(copy_split[parallel][0], tile_parallel), 'parallel'),

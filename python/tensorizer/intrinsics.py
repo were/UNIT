@@ -140,15 +140,13 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
         if len(list(op.reduce_axis)):
             from .analyzer import analyze_tiling
             points = list(analyze_tiling(op, pattern))
-            fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else -x[3])
+            fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])
             points.sort(key=fobj)
-            for x in points[-5:]:
-                print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else -x[3]), x[-1], sep='\n')
+            #for x in points[::-1]:
+            #    print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
+            #    print(x[-1])
             to_apply = points[-1][-1]
-            # print(output.axis)
-            # print(to_apply)
             to_schedule = output
-            is_stencil = False
             loops = []
             for i in range(len(output.axis)):
 

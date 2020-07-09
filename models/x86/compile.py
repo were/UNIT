@@ -36,7 +36,8 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'llvm -mcpu=cascadelake'
+# target = 'llvm -mcpu=cascadelake'
+target = 'llvm -mattr=+avx512f'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))
