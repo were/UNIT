@@ -19,7 +19,7 @@ def _ceil_div(a, b):
     return (a - 1) // b + 1
 
 
-def analyze_tiling(op, pattern, max_unroll=32, max_parallel=10000):
+def analyze_tiling(op, pattern, max_unroll=32, max_parallel=3000):
 
     info = list(tvm.arith._ffi_api.MatchTensorizer(op, pattern))
     assert info
@@ -51,7 +51,7 @@ def analyze_tiling(op, pattern, max_unroll=32, max_parallel=10000):
             fused_prod = functools.reduce(
                 operator.mul,
                 [j for i in copy_split[:parallel] for j in i if isinstance(j, int)],
-                1)# * _ceil_div(copy_split[parallel][0], tile_parallel)
+                1) * _ceil_div(copy_split[parallel][0], tile_parallel)
             if fused_prod > max_parallel:
                 continue
             copy_split[parallel] = [(_ceil_div(copy_split[parallel][0], tile_parallel), 'parallel'),

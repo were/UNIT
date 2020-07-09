@@ -58,8 +58,6 @@ def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
 
-    print(stmt)
-
     def detector(op):
         nonlocal is_init
         if isinstance(op, tvm.tir.For):
@@ -91,7 +89,7 @@ def rewrite(f, mod, ctx):
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['For', 'AttrStmt']))
 
-    # print(res)
+    print(res)
 
     return res
 

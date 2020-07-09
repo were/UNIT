@@ -142,18 +142,20 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             points = list(analyze_tiling(op, pattern))
             fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])
             points.sort(key=fobj)
-            #for x in points[::-1]:
-            #    print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
-            #    print(x[-1])
+            for x in points[::-1]:
+                print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
+                print(x[-1])
             to_apply = points[-1][-1]
             to_schedule = output
             loops = []
+            parallel_level = None
             for i in range(len(output.axis)):
 
                 if isinstance(to_apply[i][0], tuple) and to_apply[i][0][1] == 'parallel':
                     to_schedule = op
                     if str(op) != str(output):
                         outer, inner = sch[output].split(output.axis[i], nparts=to_apply[i][0][0])
+                        parallel_level = outer
                         sch[op].compute_at(sch[output], outer)
                         if i == len(output.axis) - 1:
                             sch[output].vectorize(inner)
@@ -206,8 +208,10 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
                 if unroll and hint is None:
                     unroll.append(axis)
                 elif hint == 'parallel':
-                    fusion = sch[output].fuse(*simple[:i+1])
+                    fusion = sch[output].fuse(*(simple + [parallel_level if parallel_level is not None else axis]))
                     sch[output].parallel(fusion)
+                    if str(op) != str(output):
+                        sch[op].compute_at(sch[output], fusion)
                     simple = []
                 elif hint == 'unroll':
                     unroll.append(axis)
