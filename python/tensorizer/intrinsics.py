@@ -142,9 +142,9 @@ def _schedule_vdot(outs, pattern, pragma, max_threads):
             points = list(analyze_tiling(op, pattern))
             fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])
             points.sort(key=fobj)
-            for x in points[::-1]:
-                print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
-                print(x[-1])
+            #for x in points[::-1]:
+            #    print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
+            #    print(x[-1])
             to_apply = points[-1][-1]
             to_schedule = output
             loops = []
