@@ -94,14 +94,14 @@ def _load_concatenator(load, axis, cast_type=None):
         loads.append(tvm.tir.Load(dtype, load.buffer_var, ramp))
     if is_broadcast:
         assert len(loads) == 1
-        res = tvm.tir.call_pure_intrin(ri_cast, 'reinterpret', loads[0])
+        res = tvm.tir.call_intrin(ri_cast, 'tir.reinterpret', loads[0])
         res = tvm.tir.Broadcast(res, br_lanes)
     elif len(loads) == 1:
         res = loads[0]
     else:
         res = tvm.tir.Shuffle(loads, list(range(total_lanes)))
     if cast_type is not None:
-        res = tvm.tir.call_pure_intrin(cast_type, 'reinterpret', res)
+        res = tvm.tir.call_intrin(cast_type, 'tir.reinterpret', res)
     return res
 
 def _vnni_write(store, axis, operands):
