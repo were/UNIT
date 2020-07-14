@@ -74,3 +74,6 @@ def analyze_tiling(op, pattern, max_unroll=32, max_parallel=3000):
                            fused_prod, unroll_prod, yield_split]
         if len(split[parallel]) != 1:
             break
+
+def objective(x):
+    return (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])

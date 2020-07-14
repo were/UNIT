@@ -37,7 +37,7 @@ import statistics
 import pathlib
 
 
-target = 'llvm -mcpu=cascadelake'
+target = 'llvm -mcpu=cascadelake -libs=cblas'
 def tune_kernels(tasks,
                  measure_option,
                  tuner='gridsearch',
@@ -126,7 +126,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape, tune):
     input_name = 'data'
 
     batch = 1
-    seq_length = 128
+    seq_length = 256
     input_dict = {
         'data0': (batch, seq_length),
         'data1': (batch, seq_length),
@@ -170,7 +170,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape, tune):
 
     import tensorizer
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
-                                   opt_level=3):
+                                   opt_level=4):
             graph, lib, params = relay.build_module.build(
                 mod, target=target, params=params)
 

@@ -79,7 +79,7 @@ def advance_data_iter(data_iter, n):
 
 
 def profile(num_inference_images, prefix):
-    debug = False
+    debug = True
     # np.random.seed(0)
 
     static_net = mx.gluon.SymbolBlock.imports('{}.json'.format(prefix),
@@ -91,7 +91,7 @@ def profile(num_inference_images, prefix):
     # Prepare input data
     dtype = "float32"
     batch = 1
-    seq_length = 128
+    seq_length = 256
     inputs = np.random.randint(0, 2000, size=(batch, seq_length)).astype(dtype)
     token_types = np.random.uniform(size=(batch, seq_length)).astype(dtype)
     valid_length = np.asarray([seq_length] * batch).astype(dtype)
@@ -105,8 +105,10 @@ def profile(num_inference_images, prefix):
     print(mx_out)
 
     import tvm
-    from tvm.contrib import graph_runtime
-    from tvm.contrib.debugger import debug_runtime as debug_runtime
+    if debug:
+        from tvm.contrib.debugger import debug_runtime as graph_runtime
+    else:
+        from tvm.contrib import graph_runtime
 
     
     base = os.getcwd() + '/compiled/' + prefix.split("/")[-1]
@@ -122,6 +124,8 @@ def profile(num_inference_images, prefix):
     rt_mod = graph_runtime.create(graph, lib, ctx=tvm.cpu(0))
     rt_mod.load_params(params)
     rt_mod.set_input(data0=inputs, data1=token_types, data2=valid_length)
+    if debug:
+        rt_mod.run()
 
     ftimer = rt_mod.module.time_evaluator("run", ctx=tvm.cpu(0), number=1, repeat=10)
     res = ftimer().results
