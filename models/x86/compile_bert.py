@@ -170,24 +170,24 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape, tune):
 
     import tensorizer
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
-                                   opt_level=3):
-            graph, lib, params = relay.build_module.build(
-                mod, target=target, params=params)
+            opt_level=4):
+        graph, lib, params = relay.build_module.build(
+            mod, target=target, params=params)
 
-            base_dir = os.getcwd() + "/compiled"
-            pathlib.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        base_dir = os.getcwd() + "/compiled"
+        pathlib.Path(base_dir).mkdir(parents=True, exist_ok=True)
 
-            base = base_dir + '/' + symbol_file.split('/')[-1].replace('.json','')
+        base = base_dir + '/' + symbol_file.split('/')[-1].replace('.json','')
 
-            path_lib = base + '_deploy_lib.tar'
-            path_graph =  base + '_deploy_graph.json'
-            path_params = base + '_deploy_params.params'
+        path_lib = base + '_deploy_lib.tar'
+        path_graph =  base + '_deploy_graph.json'
+        path_params = base + '_deploy_params.params'
 
-            lib.export_library(path_lib)
-            with open(path_graph, 'w') as fo:
-                fo.write(graph)
-            with open(path_params, 'wb') as fo:
-                fo.write(relay.save_param_dict(params))
+        lib.export_library(path_lib)
+        with open(path_graph, 'w') as fo:
+            fo.write(graph)
+        with open(path_params, 'wb') as fo:
+            fo.write(relay.save_param_dict(params))
 
 
 if __name__ == '__main__':
