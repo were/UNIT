@@ -30,7 +30,7 @@ int main() {
     }
     float res = end_roi();
     float gvnnis = ((float) n * m * k / 64.f * 10.0 / res) / 1000.;
-    printf("Execution time: %.5f\n", res / 100. / 1000000.);
+    printf("Execution time: %.5f\n", res / 10.);
     printf("%.2f GVNNI/us\n", gvnnis);
   }
 

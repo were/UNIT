@@ -32,7 +32,7 @@ from tvm.autotvm.tuner import XGBTuner, GATuner, RandomTuner, GridSearchTuner
 from tvm.autotvm.graph_tuner import DPTuner, PBQPTuner
 import tvm.contrib.graph_runtime as runtime
 
-debug = True
+debug = False
 
 def profile(data, symbol_file, num_inference_images, sym, devs, label_name):
     global debug

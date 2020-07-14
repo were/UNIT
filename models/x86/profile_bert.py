@@ -91,7 +91,7 @@ def profile(num_inference_images, prefix):
     # Prepare input data
     dtype = "float32"
     batch = 1
-    seq_length = 256
+    seq_length = 128
     inputs = np.random.randint(0, 2000, size=(batch, seq_length)).astype(dtype)
     token_types = np.random.uniform(size=(batch, seq_length)).astype(dtype)
     valid_length = np.asarray([seq_length] * batch).astype(dtype)
