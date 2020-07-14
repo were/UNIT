@@ -9,9 +9,11 @@ from tvm import relay
 n, m, k = 1, 1024, 512
 
 a = te.placeholder((n, k), dtype='uint8')
-b = te.placeholder((m, k), dtype='int8')
+b = te.placeholder((m // 16, k // 4, 16, 4), dtype='int8')
 
 c = topi.x86.dense_dotprod(a, b, None, 'int32')
+
+print(c.shape)
 
 from tensorizer.intrinsics import INTRINSICS
 from tensorizer.analyzer import analyze_tiling
@@ -24,7 +26,7 @@ with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rew
     ir = tvm.lower(sch, [a, b, c], simple_mode=True)
     module = tvm.build(sch, [a, b, c], target='llvm -mcpu=cascadelake')
     nda = tvm.nd.array((np.random.uniform(0, 1, (n, k)) * 32).astype('uint8'))
-    ndb = tvm.nd.array((np.random.uniform(0, 1, (m, k)) * 32).astype('int8'))
+    ndb = tvm.nd.array((np.random.uniform(0, 1, (m // 16, k // 4, 16, 4)) * 32).astype('int8'))
     ndc = tvm.nd.array((np.random.uniform(0, 1, (n, m)) * 32).astype('int32'))
     ref = tvm.nd.array((np.random.uniform(0, 1, (n, m)) * 32).astype('int32'))
     timer = module.time_evaluator(module.entry_name, tvm.cpu(0), number=10, repeat=10)

@@ -238,6 +238,7 @@ from .pattern import vector_dotprod
 
 INTRINSICS = {
   'vnni': {
+    'pattern': vector_dotprod(16, 4, 'uint8', 'int8', 'int32'),
     'operands': [
         functools.partial(_load_concatenator, cast_type='int32x16'),
         functools.partial(_load_concatenator, cast_type='int32x16'),

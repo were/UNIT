@@ -91,7 +91,7 @@ def profile(num_inference_images, prefix):
     # Prepare input data
     dtype = "float32"
     batch = 1
-    seq_length = 128
+    seq_length = 256
     inputs = np.random.randint(0, 2000, size=(batch, seq_length)).astype(dtype)
     token_types = np.random.uniform(size=(batch, seq_length)).astype(dtype)
     valid_length = np.asarray([seq_length] * batch).astype(dtype)
@@ -107,7 +107,6 @@ def profile(num_inference_images, prefix):
     import tvm
     if debug:
         from tvm.contrib.debugger import debug_runtime as grt
-        print('Debugging')
     else:
         from tvm.contrib import graph_runtime as grt
 
@@ -125,6 +124,8 @@ def profile(num_inference_images, prefix):
     rt_mod = grt.create(graph, lib, ctx=tvm.cpu(0))
     rt_mod.load_params(params)
     rt_mod.set_input(data0=inputs, data1=token_types, data2=valid_length)
+    if debug:
+        rt_mod.run()
 
     if debug:
         rt_mod.run()
