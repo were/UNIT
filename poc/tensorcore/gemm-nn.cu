@@ -11,8 +11,8 @@
 using namespace nvcuda;
 
 __global__ void foo(half *a, half *b, float *c) {
-  int block_x = blockIdx.x / 2;
-  int block_y = blockIdx.x % 2;
+  int x = blockIdx.x / 2;
+  int y = blockIdx.x % 2;
 
   wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
   wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
@@ -20,12 +20,12 @@ __global__ void foo(half *a, half *b, float *c) {
   wmma::fill_fragment(c_frag, 0.0f);
 
   for (int k = 0; k < M; k += 16) {
-    wmma::load_matrix_sync(a_frag, a + M * block_x + k, M);
-    wmma::load_matrix_sync(b_frag, b + K * k + block_y * 16, K);
+    wmma::load_matrix_sync(a_frag, a + (x * 16) * M + k, M);
+    wmma::load_matrix_sync(b_frag, b + K * k + y * 16, K);
     wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
 
-  wmma::store_matrix_sync(c + K * block_x * 16 + block_y * 16, c_frag, K, wmma::mem_row_major);
+  wmma::store_matrix_sync(c + (x * 16) * M + (y * 16), c_frag, K, wmma::mem_row_major);
 }
 
 half a[N * M], b[M * K];
@@ -40,6 +40,7 @@ void print(int n, int m, const T* a) {
     }
     std::cout << std::endl;
   }
+  std::cout << std::endl;
 }
 
 template<>
@@ -51,6 +52,7 @@ void print(int n, int m, const half* a) {
     }
     std::cout << std::endl;
   }
+  std::cout << std::endl;
 }
 
 int main() {
@@ -59,9 +61,9 @@ int main() {
   std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
 
   for (int i = 0; i < N * M; ++i)
-    a[i] = __float2half((float )rand() / RAND_MAX * 0.5);
+    a[i] = __float2half((float)(rand() % 100) / 100.);
   for (int i = 0; i < M * K; ++i)
-    b[i] = __float2half((float) rand() / RAND_MAX * 0.5);
+    b[i] = __float2half((float)(rand() % 100) / 100.);
   for (int i = 0; i < N * K; ++i)
     c[i] = 0;
   for (int i = 0; i < N; ++i)
@@ -83,7 +85,11 @@ int main() {
   cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
   std::cout.precision(1);
   std::cout << std::fixed;
+  for (int i = 0; i < N * M; ++i)
+    assert(fabs(c[i] - ref[i]) < 1e-5);
   //print(N, M, a);
-  print(N, K, c);
+  //print(N, M, b);
+  //print(N, K, c);
+  //print(N, M, ref);
   return 0;
 }
