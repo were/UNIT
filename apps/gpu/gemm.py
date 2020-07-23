@@ -37,7 +37,6 @@ nd_b = tvm.nd.array(np_b, tvm.gpu())
 nd_c = tvm.nd.array(np_c, tvm.gpu())
 
 import tensorizer
-from tensorizer.intrinsics.gpu import annotate_warpreduce
 
 #with tvm.transform.PassContext(opt_level=3):
 #    ir = tvm.lower(sch, [a, b, c], simple_mode=True)
@@ -48,11 +47,11 @@ with tvm.transform.PassContext(opt_level=3, config={'tir.add_lower_pass': [(1, t
     ir = tvm.lower(sch, [a, b, c], simple_mode=True)
     print(ir)
 
-    module = tvm.build(sch, [a, b, c], 'nvptx')
-    module(nd_a, nd_b, nd_c)
-    fte = module.time_evaluator(module.entry_name, ctx=tvm.gpu(), number=10)
-    print('%.2f GFLOP/s' % (((n * m * k) / fte(nd_a, nd_b, nd_c).mean) / 1e9))
-    #print(module.imported_modules[0].get_source())
+    #module = tvm.build(sch, [a, b, c], 'nvptx')
+    #module(nd_a, nd_b, nd_c)
+    #fte = module.time_evaluator(module.entry_name, ctx=tvm.gpu(), number=10)
+    #print('%.2f GFLOP/s' % (((n * m * k) / fte(nd_a, nd_b, nd_c).mean) / 1e9))
+    ##print(module.imported_modules[0].get_source())
 
 
 #ref = np_a.dot(np_b).astype('float32')

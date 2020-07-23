@@ -11,7 +11,7 @@
 #define M 768
 #define K 3072
 
-#define KBLOCK 8
+#define KBLOCK 4
 
 using namespace nvcuda;
 

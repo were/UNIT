@@ -9,6 +9,10 @@ def _gather_loop_trip_counts(stmt):
             assert isinstance(op.min, tvm.tir.IntImm)
             assert isinstance(op.extent, tvm.tir.IntImm)
             axis_dom.append((op.loop_var, op.min.value, op.extent.value))
+        if isinstance(op, tvm.tir.AttrStmt) and op.attr_key == 'thread_extent':
+            assert isinstance(op.value, tvm.tir.IntImm)
+            assert isinstance(op.node, tvm.tir.IterVar)
+            axis_dom.append((op.node.var, 0, op.value.value))
 
     tvm.tir.stmt_functor.post_order_visit(stmt, visitor)
 
@@ -58,6 +62,7 @@ def rewrite(f, mod, ctx):
     is_init = [False]
     cleanup = [False]
     stmt = f.body
+    print(stmt)
 
     def detector(op):
         nonlocal is_init
@@ -94,5 +99,6 @@ def rewrite(f, mod, ctx):
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['tir.For', 'tir.AttrStmt']))
+    print(res)
 
     return res
