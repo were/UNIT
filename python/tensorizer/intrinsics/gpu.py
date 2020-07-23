@@ -61,7 +61,7 @@ def schedule(outs):
     #sch[c].bind(o_outers[0], tvm.te.thread_axis('threadIdx.y'))
     fused = sch[c].fuse(o_outers[0], o_outers[1])
     sch[c].bind(fused, blkx)
-    z[c].pragma(o_inners[0], 'tensorize', 'tensorcore')
+    sch[c].pragma(o_inners[0], 'tensorize', 'tensorcore')
 
     return sch
 
@@ -72,7 +72,6 @@ def writeback(store, axis, operands):
 
     ripper = {i[0]: tvm.tir.const(0, 'int32') for i in axis[:3]}
 
-    print(axis)
     coef = tvm.arith.detect_linear_equation(operands[1].args[0].index, [i[0] for i in axis[:3]])
     aval = tvm.tir.call_llvm_intrin('handle', 'llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p0i32',
         tvm.tir.const(2, 'int32'), tvm.tir.stmt_functor.substitute(operands[1], ripper), coef[2])

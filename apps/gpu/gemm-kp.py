@@ -31,8 +31,7 @@ sch = te.create_schedule(c.op)
 
 ro, ri = sch[c].split(sch[c].op.reduce_axis[0], 4)
 rf = sch.rfactor(c, ri)
-c_shared = sch.cache_write(rf, 'shared')
-c_acc = sch.cache_write(c_shared, 'wmma.accumulator')
+c_acc = sch.cache_write(rf, 'wmma.accumulator')
 
 xo, xi = sch[c].split(sch[c].op.axis[0], 16)
 yo, yi = sch[c].split(sch[c].op.axis[1], 16)
@@ -41,8 +40,8 @@ sch[c].bind(xo, blkY)
 sch[c].bind(yo, blkX)
 
 sch[rf].compute_at(sch[c], yo)
-sch[c_shared].compute_at(sch[c], yo)
 sch[c_acc].compute_at(sch[c], yo)
+#sch[c_acc].compute_at(sch[rf], sch[rf].op.axis[0])
 
 ro, ri = sch[c_acc].split(sch[c_acc].op.reduce_axis[0], 16)
 acc_xo, acc_xi = sch[c_acc].split(sch[c_acc].op.axis[1], 16)
@@ -50,10 +49,10 @@ acc_yo, acc_yi = sch[c_acc].split(sch[c_acc].op.axis[2], 16)
 sch[c_acc].reorder(sch[c_acc].op.axis[0], ro, acc_xo, acc_yo, acc_xi, acc_yi, ri)
 
 sch[c_acc].bind(sch[c_acc].op.axis[0], thrY)
-#sch[c_shared].bind(sch[c_shared].op.axis[0], thrY)
+#sch[rf].bind(sch[rf].op.axis[0], thrY)
 
 sch[c_acc].pragma(acc_xi, 'tensorize', 'tensorcore')
-sch[c_shared].pragma(sch[c_shared].op.axis[1], 'tensorize', 'tensorcore')
+sch[rf].pragma(sch[rf].op.axis[1], 'tensorize', 'tensorcore')
 
 xio, xii = sch[c].split(xi, nparts=4)
 yio, yii = sch[c].split(yi, 2)
