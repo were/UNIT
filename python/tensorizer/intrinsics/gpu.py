@@ -68,15 +68,20 @@ def schedule(outs):
 def loader(load, axis):
     return tvm.tir.call_intrin('handle', 'tir.address_of', load)
 
+# i * stride + j -> stride
+# (io * 4 + ii) * stride + j -> stride * 4
+
 def writeback(store, axis, operands):
 
     ripper = {i[0]: tvm.tir.const(0, 'int32') for i in axis[:3]}
 
     coef = tvm.arith.detect_linear_equation(operands[1].args[0].index, [i[0] for i in axis[:3]])
+    print(coef)
     aval = tvm.tir.call_llvm_intrin('handle', 'llvm.nvvm.wmma.m16n16k16.load.a.row.stride.f16.p0i32',
         tvm.tir.const(2, 'int32'), tvm.tir.stmt_functor.substitute(operands[1], ripper), coef[2])
     avar = tvm.tir.Var('aval', 'handle')
     coef = tvm.arith.detect_linear_equation(operands[2].args[0].index, [i[0] for i in axis[:3]])
+    print(coef)
     bval = tvm.tir.call_llvm_intrin('handle', 'llvm.nvvm.wmma.m16n16k16.load.b.row.stride.f16.p0i32',
        tvm.tir.const(2, 'int32'), tvm.tir.stmt_functor.substitute(operands[2], ripper), coef[0])
     bvar = tvm.tir.Var('bval', 'handle')

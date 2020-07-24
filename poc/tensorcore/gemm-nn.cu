@@ -51,6 +51,7 @@ __global__ void splitk(half *a, half *b, float *c) {
     wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
 
+
   wmma::store_matrix_sync(spad + 16 * 16 * threadIdx.y, c_frag, 16, wmma::mem_row_major);
 
   __syncthreads();
@@ -68,7 +69,7 @@ __global__ void splitk(half *a, half *b, float *c) {
     c[((x * 16) + xx) * M + (y * 16) + yy] = spad[workidx * workload + i];
   }
 
-  // wmma::store_matrix_sync(c + (x * 16) * M + (y * 16), c_frag, M, wmma::mem_row_major);
+  // wmma::store_matrix_sync(c + ((x * 16) * M + (y * 16)) * 4 + threadIdx.y * 256, c_frag, 16, wmma::mem_row_major);
 }
 
 half a[N * K], b[M * K];
@@ -139,7 +140,7 @@ int main() {
   float *dev_c;
   cudaMalloc(&dev_a, N * K * sizeof(half));
   cudaMalloc(&dev_b, M * K * sizeof(half));
-  cudaMalloc(&dev_c, N * M * sizeof(float));
+  cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
   cudaMemcpy(dev_a, a, sizeof a, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_b, b, sizeof b, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
