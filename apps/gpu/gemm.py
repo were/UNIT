@@ -59,3 +59,4 @@ with tvm.transform.PassContext(opt_level=3, config={'tir.add_lower_pass': [(1, t
 ref = np_a.dot(np_b).astype('float32')
 
 np.testing.assert_allclose(ref, nd_c.asnumpy(), atol=1e-3, rtol=1e-3)
+
