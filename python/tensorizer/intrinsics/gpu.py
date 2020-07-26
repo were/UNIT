@@ -89,7 +89,8 @@ def writeback(store, axis, operands):
     buffer_var = operands[0].args[0].buffer_var
     operands = []
 
-    idx = _flatten_index(axis[3:])
+    idx = tvm.tir.const(0, 'int32') #_flatten_index(axis[3:])
+    idx = tvm.tir.stmt_functor.substitute(store.index, ripper) // 256
 
     # TODO(@were): Only one 1 trip count is supported for now.
     for j in range(8):
@@ -108,8 +109,8 @@ def writeback(store, axis, operands):
     itm = tvm.tir.Var('intermediate', 'handle')
     stmts = []
     for j in range(8):
-        val = tvm.tir.call_intrin(dtype, 'tir.tvm_struct_get', itm, tvm.tir.const(0, 'int32'), tvm.tir.const(j, 'int32'))
-        set_val = tvm.tir.call_intrin(dtype, 'tir.tvm_struct_set', buffer_var, tvm.tir.const(0, 'int32'), tvm.tir.const(j, 'int32'), val)
+        val = tvm.tir.call_intrin(dtype, 'tir.tvm_struct_get', itm, 0, tvm.tir.const(j, 'int32'))
+        set_val = tvm.tir.call_intrin(dtype, 'tir.tvm_struct_set', buffer_var, idx, tvm.tir.const(j, 'int32'), val)
         stmts.append(tvm.tir.Evaluate(set_val))
 
     seq = tvm.tir.SeqStmt(stmts)
@@ -141,7 +142,9 @@ def _flatten_index(axis):
 def initializer(store, axis):
     stmts = []
 
-    idx = _flatten_index(axis[2:])
+    ripper = {i[0]: tvm.tir.const(0, 'int32') for i in axis[:3]}
+    idx = tvm.tir.const(0, 'int32') #_flatten_index(axis[2:])
+    idx = tvm.tir.stmt_functor.substitute(store.index, ripper) // 256
     for j in range(8):
         struct_set = tvm.tir.call_intrin('handle', 'tir.tvm_struct_set', store.buffer_var, idx,
                                          tvm.tir.const(j, 'int32'), tvm.tir.const(0, store.value.dtype))
@@ -161,6 +164,7 @@ def cleanup(store, loads, axis):
     args = [addr]
 
     idx = _flatten_index(axis[2:])
+    idx = tvm.tir.stmt_functor.substitute(store.index, ripper) // 256
     dtype = loads[0].dtype
     buffer_var = loads[0].buffer_var
     for j in range(8):
@@ -172,5 +176,8 @@ def cleanup(store, loads, axis):
                                  tvm.tir.const(10, 'int32'), *args))
 
     res = _wrap_unroll(axis[2:], res)
+    res = tvm.tir.AttrStmt(threadIdx_x, 'thread_extent', tvm.tir.const(32, 'int32'), res)
+    res = [res, tvm.tir.Evaluate(tvm.tir.call_llvm_intrin('handle', 'llvm.nvvm.barrier0', tvm.tir.const(0, 'int32')))]
 
-    return tvm.tir.AttrStmt(threadIdx_x, 'thread_extent', tvm.tir.const(32, 'int32'), res)
+    res = tvm.tir.SeqStmt(res)
+    return res

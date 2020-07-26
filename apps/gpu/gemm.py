@@ -52,6 +52,7 @@ with tvm.transform.PassContext(opt_level=3, config={'tir.add_lower_pass': [(1, t
     module = tvm.build(sch, [a, b, c], 'nvptx')
     module(nd_a, nd_b, nd_c)
     fte = module.time_evaluator(module.entry_name, ctx=tvm.gpu(), number=10)
+    print(fte(nd_a, nd_b, nd_c).mean * 1e6)
     print('%.2f GFLOP/s' % (((n * m * k) / fte(nd_a, nd_b, nd_c).mean) / 1e9))
     #print(module.imported_modules[0].get_source())
 
