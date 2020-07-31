@@ -19,10 +19,22 @@ INTRINSICS = {
       'schedule': cpu.arm_schedule
   },
   'tensorcore': {
-      'operands': [gpu.loader, gpu.loader, gpu.loader],
-      'write': gpu.writeback,
+      'operands': [gpu.operand_c_fp32_compute, gpu.operand_a_fp16x2, gpu.operand_b_fp16x2],
+      'write': gpu.write_fp32,
       'init': gpu.initializer,
       'schedule': gpu.schedule,
       'cleanup': gpu.cleanup
+  },
+  'tensorcore.load_a': {
+      'operands': [gpu.load_a],
+      'write': gpu.store_ab,
+  },
+  'tensorcore.load_b': {
+      'operands': [gpu.load_b],
+      'write': gpu.store_ab,
+  },
+  'tensorcore.store_c': {
+      'operands': [gpu.operand_c_fp32_store],
+      'write': gpu.cleanup,
   }
 }

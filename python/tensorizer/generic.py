@@ -60,7 +60,6 @@ def _gather_condition(stmt, axis):
 @tvm.tir.transform.prim_func_pass(opt_level=0)
 def rewrite(f, mod, ctx):
     is_init = [False]
-    cleanup = [False]
     stmt = f.body
     print(stmt)
 
@@ -70,7 +69,7 @@ def rewrite(f, mod, ctx):
             is_init[0] = ('.init:') in str(op.loop_var)
 
     def visitor(op):
-        nonlocal is_init, cleanup
+        nonlocal is_init
         if isinstance(op, tvm.tir.AttrStmt):
             if op.attr_key == 'pragma_tensorize':
                 from .intrinsics import INTRINSICS
@@ -79,15 +78,14 @@ def rewrite(f, mod, ctx):
                 cond = _gather_condition(op, axis)
 
                 if not is_init[0]:
-                    if not cleanup[0]:
-                        encoded_operands = []
-                        for i in zip(loads, INTRINSICS[op.value.value]['operands']):
-                            encoded_operands.append(i[1](i[0], axis))
-                        xform = INTRINSICS[op.value.value]['write'](store, axis, encoded_operands)
-                        cleanup[0] = True
-                    else:
-                        assert 'cleanup' in INTRINSICS[op.value.value].keys()
-                        xform = INTRINSICS[op.value.value]['cleanup'](store, loads, axis)
+                    encoded_operands = []
+                    for i in zip(loads, INTRINSICS[op.value.value]['operands']):
+                        tmp = i[1](i[0], axis)
+                        if isinstance(tmp, (list, tuple)):
+                            encoded_operands += list(tmp)
+                        else:
+                            encoded_operands.append(tmp)
+                    xform = INTRINSICS[op.value.value]['write'](store, axis, encoded_operands)
                 else:
                     is_init[0] = False
                     xform = INTRINSICS[op.value.value]['init'](store, axis)

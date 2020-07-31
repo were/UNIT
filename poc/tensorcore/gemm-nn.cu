@@ -8,8 +8,8 @@
 #include "../util.h"
 
 #define N 128
-#define M 768
-#define K 3072
+#define M 128
+#define K 128
 
 #define KBLOCK 4
 
@@ -37,7 +37,7 @@ __global__ void vanilla(half *a, half *b, float *c) {
 __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __restrict__ c) {
   int x = blockIdx.y;
   int y = blockIdx.x;
-  __shared__ float spad[16 * 16 * KBLOCK];
+  __shared__ float spad[KBLOCK * 16 * 16];
 
   wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
   wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
@@ -57,7 +57,7 @@ __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __r
   __syncthreads();
 
   int workidx = 32 * threadIdx.y + threadIdx.x;
-  int workload = 256 / (32 * KBLOCK);
+  int workload = (16 * 16) / (32 * KBLOCK);
 
   for (int i = 0; i < workload; ++i) {
     #pragma UNROLL
@@ -75,36 +75,56 @@ __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __r
 __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float * __restrict__ c) {
   int x = blockIdx.y;
   int y = blockIdx.x;
-  __shared__ float spad[16 * 16 * KBLOCK];
+  __shared__ float spad[KBLOCK * 4 * 16 * 16];
 
-  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
-  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
-  wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag;
-  wmma::fill_fragment(c_frag, 0.0f);
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag[2][2];
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag[2][2];
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag[2][2];
 
-  for (int k_inner = 0; k_inner < (K / KBLOCK); k_inner += 16) {
-    int k = threadIdx.y * (K / KBLOCK) + k_inner;
-    wmma::load_matrix_sync(a_frag, a + (x * 16) * K + k, K);
-    wmma::load_matrix_sync(b_frag, b + k * M + y * 16, M);
-    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 2; ++j) {
+      wmma::fill_fragment(c_frag[i][j], 0.0f);
+    }
+  }
+
+  for (int k_inner = 0; k_inner < (K / KBLOCK); k_inner += 32) {
+    for (int i = 0; i < 2; ++i) {
+      for (int j = 0; j < 2; ++j) {
+        int k = threadIdx.y * (K / KBLOCK) + k_inner;
+        wmma::load_matrix_sync(a_frag[i][j], a + ((x * 32) + (i * 16)) * K + k + j * 16, K);
+        wmma::load_matrix_sync(b_frag[i][j], b + (k + i * 16) * M + y* 32 + j * 16, M);
+      }
+    }
+    for (int i = 0; i < 2; ++i) {
+      for (int j = 0; j < 2; ++j) {
+        for (int k = 0; k < 2; ++k) {
+          wmma::mma_sync(c_frag[i][j], a_frag[i][k], b_frag[k][j], c_frag[i][j]);
+        }
+      }
+    }
   }
 
 
-  wmma::store_matrix_sync(spad + 16 * 16 * threadIdx.y, c_frag, 16, wmma::mem_row_major);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 2; ++j) {
+      wmma::store_matrix_sync(spad + 4 * 16 * 16 * threadIdx.y + (i * 2 + j) * 256,
+                              c_frag[i][j], 16, wmma::mem_row_major);
+    }
+  }
 
   __syncthreads();
 
-  int workidx = 32 * threadIdx.y + threadIdx.x;
-  int workload = 256 / (32 * KBLOCK);
+  //int workidx = 32 * threadIdx.y + threadIdx.x;
+  int workload = (32 * 32) / (32 * KBLOCK);
 
   for (int i = 0; i < workload; ++i) {
-    #pragma UNROLL
+    int idx = threadIdx.y * 256 + (threadIdx.x / 2) * 16 + i + (threadIdx.x % 2) * 8;
     for (int j = 1; j < KBLOCK; ++j) {
-      spad[workidx * workload + i] += spad[j * 16 * 16 + workidx * workload + i];
+      spad[idx] += spad[j * (256 * 4) + idx];
     }
-    int xx = (workidx * workload + i) % 16;
-    int yy = (workidx * workload + i) / 16;
-    c[((x * 16) + xx) * M + (y * 16) + yy] = spad[workidx * workload + i];
+    int xx = idx / 32;
+    int yy = idx % 32;
+    c[(x * 32 + xx) * M + (y * 32 + yy)] = spad[idx];
   }
 
 }
@@ -153,13 +173,9 @@ int main() {
   std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
 
   for (int i = 0; i < N * K; ++i)
-    a[i] = __float2half(1);
-    //a[i] = __float2half((float)(rand() % 100) / 100.);
+    a[i] = __float2half((float)(rand() % 100) / 100.);
   for (int i = 0; i < K * M; ++i)
-    b[i] = __float2half(1);
-    //b[i] = __float2half((float)(rand() % 100) / 100.);
-  for (int i = 0; i < N * M; ++i)
-    c[i] = 0;
+    b[i] = __float2half((float)(rand() % 100) / 100.);
   for (int i = 0; i < N; ++i)
     for (int j = 0; j < M; ++j) {
       ref[i * M + j] = 0.0;
@@ -184,6 +200,7 @@ int main() {
 
   std::cout.precision(5);
   {
+    memset(c, 0, sizeof(c));
     float *dev_c;
     cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
     cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
@@ -202,6 +219,7 @@ int main() {
   }
 
   {
+    memset(c, 0, sizeof(c));
     float *dev_c;
     cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
     cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
@@ -220,6 +238,7 @@ int main() {
   }
 
   {
+    memset(c, 0, sizeof(c));
     float *dev_c;
     cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
     cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
@@ -232,6 +251,7 @@ int main() {
     cudaDeviceSynchronize();
     float elps = end_roi();
     std::cout << "time elps: " << elps << std::endl;
+    std::cout << (N * M * K) / elps / 1000. << std::endl;
     cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
     compare(N * M, c, ref);
     cudaFree(dev_c);
