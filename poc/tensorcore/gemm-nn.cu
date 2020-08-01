@@ -1,4 +1,6 @@
 #include <cassert>
+#include <cuda_device_runtime_api.h>
+#include <driver_types.h>
 #include <iostream>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -8,10 +10,19 @@
 #include "../util.h"
 
 #define N 128
-#define M 128
-#define K 128
+#define M 768
+#define K 3072
 
-#define KBLOCK 4
+#define KBLOCK 2
+
+#define CUDA_ENFORCE(x)                               \
+  do {                                                \
+    auto ec = x;                                      \
+    if (ec != cudaSuccess) {                          \
+      std::cout << cudaGetErrorName(ec) << std::endl; \
+      throw;                                          \
+    }                                                 \
+  } while(false)
 
 using namespace nvcuda;
 
@@ -71,14 +82,19 @@ __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __r
 
 }
 
-
+#define TILEX 2
+#define TILEY 2
 __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float * __restrict__ c) {
   int x = blockIdx.y;
   int y = blockIdx.x;
-  __shared__ float spad[KBLOCK * 4 * 16 * 16];
+  __shared__ float spad[KBLOCK * 2 * 2 * 16 * 16];
+  __shared__ half aa[KBLOCK * 2 * 16 * 16];
+  __shared__ half bb[KBLOCK * 2 * 16 * 16];
+  half la[256 * 2 / 32];
+  half lb[256 * 2 / 32];
 
-  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag[2][2];
-  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag[2][2];
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag[2];
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag[2];
   wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag[2][2];
 
   for (int i = 0; i < 2; ++i) {
@@ -87,47 +103,69 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
     }
   }
 
-  for (int k_inner = 0; k_inner < (K / KBLOCK); k_inner += 32) {
-    for (int i = 0; i < 2; ++i) {
-      for (int j = 0; j < 2; ++j) {
-        int k = threadIdx.y * (K / KBLOCK) + k_inner;
-        wmma::load_matrix_sync(a_frag[i][j], a + ((x * 32) + (i * 16)) * K + k + j * 16, K);
-        wmma::load_matrix_sync(b_frag[i][j], b + (k + i * 16) * M + y* 32 + j * 16, M);
+  for (int k_inner = -16; k_inner < (K / KBLOCK); k_inner += 16) {
+    if (k_inner + 16 < k_inner < (K / KBLOCK)) {
+      int i = threadIdx.x / 16;
+      int xx = threadIdx.x % 16;
+      int k = threadIdx.y * (K / KBLOCK) + (k_inner + 16);
+      // a[((x * 2 * 16) + (i * 16)):16][k:16];
+      // b[k:16][(y * 2 * 16 + i * 16):16];
+      for (int yy = 0; yy < 16; ++ yy) {
+        la[yy] = a[(((x * 2 * 16) + (i * 16)) + xx) * K + (k + yy)];
+        la[yy] = b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)];
       }
     }
-    for (int i = 0; i < 2; ++i) {
-      for (int j = 0; j < 2; ++j) {
-        for (int k = 0; k < 2; ++k) {
-          wmma::mma_sync(c_frag[i][j], a_frag[i][k], b_frag[k][j], c_frag[i][j]);
+    if (k_inner >= 0) {
+      for (int i = 0; i < 2; ++i) {
+        int k = threadIdx.y;
+        wmma::load_matrix_sync(a_frag[i], aa + k * 2 * 16 * 16 + i * 16 * 16, 16);
+        wmma::load_matrix_sync(b_frag[i], bb + k * 2 * 16 * 16 + i * 16 * 16, 16);
+      }
+      for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+          wmma::mma_sync(c_frag[i][j], a_frag[i], b_frag[j], c_frag[i][j]);
         }
       }
+    }
+    if (k_inner + 16 < (K / KBLOCK)) {
+      __syncthreads();
+      // __shared__ half aa[KBLOCK][2][16][16];
+      int k = threadIdx.y;
+      int i = threadIdx.x / 16;
+      int xx = threadIdx.x % 16;
+      for (int yy = 0; yy < 16; ++yy) {
+        // aa[threadIdx.y][i][xx][yy] = la[i][xx][yy]
+        aa[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = la[yy];
+        bb[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = lb[yy];
+      }
+      __syncthreads();
     }
   }
 
 
   for (int i = 0; i < 2; ++i) {
     for (int j = 0; j < 2; ++j) {
-      wmma::store_matrix_sync(spad + 4 * 16 * 16 * threadIdx.y + (i * 2 + j) * 256,
+      wmma::store_matrix_sync(spad + 2 * 2 * 16 * 16 * threadIdx.y + (i * 2 + j) * 256,
                               c_frag[i][j], 16, wmma::mem_row_major);
     }
   }
 
   __syncthreads();
 
-  //int workidx = 32 * threadIdx.y + threadIdx.x;
-  int workload = (32 * 32) / (32 * KBLOCK);
-
-  for (int i = 0; i < workload; ++i) {
-    int idx = threadIdx.y * 256 + (threadIdx.x / 2) * 16 + i + (threadIdx.x % 2) * 8;
-    for (int j = 1; j < KBLOCK; ++j) {
-      spad[idx] += spad[j * (256 * 4) + idx];
+  int i = threadIdx.y;
+  int j = threadIdx.x / 16;
+  int xx = threadIdx.x % 16;
+  for (int yy = 0; yy < 16; ++yy) {
+    for (int k = 1; k < KBLOCK; ++k) {
+      spad[(i * 2 + j) * 256 + xx * 16 + yy]
+        += spad[k * 2 * 2 * 256 + (i * 2 + j) * 256 + xx * 16 + yy];
     }
-    int xx = idx / 32;
-    int yy = idx % 32;
-    c[(x * 32 + xx) * M + (y * 32 + yy)] = spad[idx];
+    c[(x * 32 + (i * 16 + xx)) * M + (y * 32 + (j * 16 + yy))] = spad[(i * 2 + j) * 256 + xx * 16 + yy];
   }
 
 }
+#undef TILEX
+#undef TILEY
 
 
 half a[N * K], b[M * K];
@@ -168,9 +206,9 @@ void compare(int n, float *c, float *ref) {
 }
 
 int main() {
-  cudaDeviceProp prop;
-  assert(cudaSuccess == cudaGetDeviceProperties(&prop, 0));
-  std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
+  //cudaDeviceProp prop;
+  //assert(cudaSuccess == cudaGetDeviceProperties(&prop, 0));
+  //std::cout << "Warp size is: " <<  prop.warpSize << std::endl;
 
   for (int i = 0; i < N * K; ++i)
     a[i] = __float2half((float)(rand() % 100) / 100.);
@@ -218,44 +256,44 @@ int main() {
     cudaFree(dev_c);
   }
 
-  {
-    memset(c, 0, sizeof(c));
-    float *dev_c;
-    cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
-    cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
-    dim3 threads(32, KBLOCK, 1);
-    dim3 blocks(M / 16, N / 16);
-    splitk<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    begin_roi();
-    splitk<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    float elps = end_roi();
-    std::cout << "time elps: " << elps << std::endl;
-    cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
-    compare(N * M, c, ref);
-    cudaFree(dev_c);
-  }
+  //{
+  //  memset(c, 0, sizeof(c));
+  //  float *dev_c;
+  //  cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
+  //  cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
+  //  dim3 threads(32, KBLOCK, 1);
+  //  dim3 blocks(M / 16, N / 16);
+  //  splitk<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+  //  cudaDeviceSynchronize();
+  //  begin_roi();
+  //  splitk<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+  //  cudaDeviceSynchronize();
+  //  float elps = end_roi();
+  //  std::cout << "time elps: " << elps << std::endl;
+  //  cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
+  //  compare(N * M, c, ref);
+  //  cudaFree(dev_c);
+  //}
 
-  {
-    memset(c, 0, sizeof(c));
-    float *dev_c;
-    cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
-    cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
-    dim3 threads(32, KBLOCK, 1);
-    dim3 blocks(M / 32, N / 32);
-    shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    begin_roi();
-    shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    float elps = end_roi();
-    std::cout << "time elps: " << elps << std::endl;
-    std::cout << (N * M * K) / elps / 1000. << std::endl;
-    cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
-    compare(N * M, c, ref);
-    cudaFree(dev_c);
-  }
+  //{
+  //  memset(c, 0, sizeof(c));
+  //  float *dev_c;
+  //  cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
+  //  cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
+  //  dim3 threads(32, KBLOCK, 1);
+  //  dim3 blocks(M / 32, N / 32);
+  //  shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+  //  CUDA_ENFORCE(cudaDeviceSynchronize());
+  //  begin_roi();
+  //  shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+  //  CUDA_ENFORCE(cudaDeviceSynchronize());
+  //  float elps = end_roi();
+  //  std::cout << "time elps: " << elps << std::endl;
+  //  std::cout << (N * M * K) / elps / 1000. << std::endl;
+  //  cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
+  //  compare(N * M, c, ref);
+  //  cudaFree(dev_c);
+  //}
 
 
   //print(N, M, a);
