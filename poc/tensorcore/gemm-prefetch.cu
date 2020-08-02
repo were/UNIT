@@ -78,7 +78,9 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
   wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag[2];
   wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag[2][2];
 
+  #pragma unroll
   for (int i = 0; i < 2; ++i) {
+    #pragma unroll
     for (int j = 0; j < 2; ++j) {
       wmma::fill_fragment(c_frag[i][j], 0.0f);
     }
@@ -91,9 +93,12 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
       int k = threadIdx.y * (K / KBLOCK) + (k_inner + 16);
       // a[((x * 2 * 16) + (i * 16)):16][k:16];
       // b[k:16][(y * 2 * 16 + i * 16):16];
-      for (int yy = 0; yy < 16; ++ yy) {
-        la[yy] = a[(((x * 2 * 16) + (i * 16)) + xx) * K + (k + yy)];
-        lb[yy] = b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)];
+      #pragma unroll
+      for (int yy = 0; yy < 16; yy += 8) {
+        *reinterpret_cast<int4*>(&la[yy]) = *reinterpret_cast<int4*>(&a[(((x * 2 * 16) + (i * 16)) + xx) * K + (k + yy)]);
+        *reinterpret_cast<int4*>(&lb[yy]) = *reinterpret_cast<int4*>(&b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)]);
+        //la[yy] = a[(((x * 2 * 16) + (i * 16)) + xx) * K + (k + yy)];
+        //lb[yy] = b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)];
       }
     }
     if (k_inner >= 0) {
@@ -114,17 +119,22 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
       int k = threadIdx.y;
       int i = threadIdx.x / 16;
       int xx = threadIdx.x % 16;
-      for (int yy = 0; yy < 16; ++yy) {
+      #pragma unroll
+      for (int yy = 0; yy < 16; yy += 8) {
         // aa[threadIdx.y][i][xx][yy] = la[i][xx][yy]
-        aa[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = la[yy];
-        bb[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = lb[yy];
+        *reinterpret_cast<int4*>(&aa[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy]) = *reinterpret_cast<int4*>(&la[yy]);
+        *reinterpret_cast<int4*>(&bb[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy]) = *reinterpret_cast<int4*>(&lb[yy]);
+        //aa[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = la[yy];
+        //bb[k * 16 * 16 * 2 + i * 16 * 16 + xx * 16 + yy] = lb[yy];
       }
       __syncthreads();
     }
   }
 
 
+  #pragma unroll
   for (int i = 0; i < 2; ++i) {
+    #pragma unroll
     for (int j = 0; j < 2; ++j) {
       wmma::store_matrix_sync(spad + 2 * 2 * 16 * 16 * threadIdx.y + (i * 2 + j) * 256,
                               c_frag[i][j], 16, wmma::mem_row_major);
