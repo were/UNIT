@@ -102,12 +102,15 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
       }
     }
     if (k_inner >= 0) {
+      #pragma unroll
       for (int i = 0; i < 2; ++i) {
         int k = threadIdx.y;
         wmma::load_matrix_sync(a_frag[i], aa + k * 2 * 16 * 16 + i * 16 * 16, 16);
         wmma::load_matrix_sync(b_frag[i], bb + k * 2 * 16 * 16 + i * 16 * 16, 16);
       }
+      #pragma unroll
       for (int i = 0; i < 2; ++i) {
+        #pragma unroll
         for (int j = 0; j < 2; ++j) {
           wmma::mma_sync(c_frag[i][j], a_frag[i], b_frag[j], c_frag[i][j]);
         }
@@ -146,12 +149,18 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
   int i = threadIdx.y;
   int j = threadIdx.x / 16;
   int xx = threadIdx.x % 16;
-  for (int yy = 0; yy < 16; ++yy) {
+  for (int yy = 0; yy < 16; yy += 4) {
+    float4 acc =
+      *reinterpret_cast<float4*>(&spad[(i * 2 + j) * 256 + xx * 16 + yy]);
     for (int k = 1; k < KBLOCK; ++k) {
-      spad[(i * 2 + j) * 256 + xx * 16 + yy]
-        += spad[k * 2 * 2 * 256 + (i * 2 + j) * 256 + xx * 16 + yy];
+      float4 delta =
+        *reinterpret_cast<float4*>(&spad[k * 2 * 2 * 256 + (i * 2 + j) * 256 + xx * 16 + yy]);
+      acc.w += delta.w;
+      acc.x += delta.x;
+      acc.y += delta.y;
+      acc.z += delta.z;
     }
-    c[(x * 32 + (i * 16 + xx)) * M + (y * 32 + (j * 16 + yy))] = spad[(i * 2 + j) * 256 + xx * 16 + yy];
+    *reinterpret_cast<float4*>(&c[(x * 32 + (i * 16 + xx)) * M + (y * 32 + (j * 16 + yy))]) = acc;
   }
 
 }
