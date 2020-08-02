@@ -26,25 +26,6 @@
 
 using namespace nvcuda;
 
-__global__ void vanilla(half *a, half *b, float *c) {
-  int x = blockIdx.y;
-  int y = blockIdx.x;
-
-  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
-  wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag;
-  wmma::fragment<wmma::accumulator, 16, 16, 16, float, void> c_frag;
-  wmma::fill_fragment(c_frag, 0.0f);
-
-  for (int k = 0; k < K; k += 16) {
-    wmma::load_matrix_sync(a_frag, a + (x * 16) * K + k, K);
-    wmma::load_matrix_sync(b_frag, b + k * M + y * 16, M);
-    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-  }
-
-  wmma::store_matrix_sync(c + (x * 16) * M + (y * 16), c_frag, M, wmma::mem_row_major);
-}
-
-
 __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __restrict__ c) {
   int x = blockIdx.y;
   int y = blockIdx.x;
@@ -112,7 +93,7 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
       // b[k:16][(y * 2 * 16 + i * 16):16];
       for (int yy = 0; yy < 16; ++ yy) {
         la[yy] = a[(((x * 2 * 16) + (i * 16)) + xx) * K + (k + yy)];
-        la[yy] = b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)];
+        lb[yy] = b[(k + xx) * M + ((y * 2 * 16 + i * 16) + yy)];
       }
     }
     if (k_inner >= 0) {
@@ -237,24 +218,6 @@ int main() {
   cudaMemcpy(dev_b, b, sizeof b, cudaMemcpyHostToDevice);
 
   std::cout.precision(5);
-  {
-    memset(c, 0, sizeof(c));
-    float *dev_c;
-    cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
-    cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
-    dim3 threads(32, 1, 1);
-    dim3 blocks(M / 16, N / 16, 1);
-    vanilla<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    begin_roi();
-    vanilla<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-    cudaDeviceSynchronize();
-    float elps = end_roi();
-    std::cout << "time elps: " << elps << std::endl;
-    cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
-    compare(N * M, c, ref);
-    cudaFree(dev_c);
-  }
 
   //{
   //  memset(c, 0, sizeof(c));
@@ -275,25 +238,25 @@ int main() {
   //  cudaFree(dev_c);
   //}
 
-  //{
-  //  memset(c, 0, sizeof(c));
-  //  float *dev_c;
-  //  cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
-  //  cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
-  //  dim3 threads(32, KBLOCK, 1);
-  //  dim3 blocks(M / 32, N / 32);
-  //  shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-  //  CUDA_ENFORCE(cudaDeviceSynchronize());
-  //  begin_roi();
-  //  shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
-  //  CUDA_ENFORCE(cudaDeviceSynchronize());
-  //  float elps = end_roi();
-  //  std::cout << "time elps: " << elps << std::endl;
-  //  std::cout << (N * M * K) / elps / 1000. << std::endl;
-  //  cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
-  //  compare(N * M, c, ref);
-  //  cudaFree(dev_c);
-  //}
+  {
+    memset(c, 0, sizeof(c));
+    float *dev_c;
+    cudaMalloc(&dev_c, N * M * KBLOCK * sizeof(float));
+    cudaMemcpy(dev_c, c, sizeof c, cudaMemcpyHostToDevice);
+    dim3 threads(32, KBLOCK, 1);
+    dim3 blocks(M / 32, N / 32);
+    shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+    CUDA_ENFORCE(cudaDeviceSynchronize());
+    begin_roi();
+    shared_mem<<<blocks, threads>>>(dev_a, dev_b, dev_c);
+    CUDA_ENFORCE(cudaDeviceSynchronize());
+    float elps = end_roi();
+    std::cout << "time elps: " << elps << std::endl;
+    std::cout << (N * M * K) / elps / 1000. << std::endl;
+    cudaMemcpy(c, dev_c, sizeof c, cudaMemcpyDeviceToHost);
+    compare(N * M, c, ref);
+    cudaFree(dev_c);
+  }
 
 
   //print(N, M, a);
