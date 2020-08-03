@@ -63,16 +63,14 @@ __global__ void splitk(half * __restrict__ a, half * __restrict__ b, float * __r
 
 }
 
-#define TILEX 2
-#define TILEY 2
 __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float * __restrict__ c) {
   int x = blockIdx.y;
   int y = blockIdx.x;
   __shared__ float spad[KBLOCK * 2 * 2 * 16 * 16];
   __shared__ half aa[KBLOCK * 2 * 16 * 16];
   __shared__ half bb[KBLOCK * 2 * 16 * 16];
-  half la[256 * 2 / 32];
-  half lb[256 * 2 / 32];
+  half la[256 * KBLOCK / 32];
+  half lb[256 * KBLOCK / 32];
 
   wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag[2];
   wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> b_frag[2];
@@ -164,8 +162,6 @@ __global__ void shared_mem(half * __restrict__ a, half * __restrict__ b, float *
   }
 
 }
-#undef TILEX
-#undef TILEY
 
 
 half a[N * K], b[M * K];

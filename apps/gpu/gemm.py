@@ -37,6 +37,7 @@ sch[c].bind(xo, blkY)
 sch[c].bind(yo, blkX)
 xio, xii = sch[c].split(xi, nparts=2)
 sch[c].bind(xio, thrY)
+sch[c].bind(yi, thrX)
 
 sch[rf].compute_at(sch[c], yo)
 c_acc = sch.cache_write(rf, 'wmma.accumulator')
@@ -94,12 +95,12 @@ np_c = np.random.randn(n, m).astype('float32')
 #np_b = np.ones((k, m)).astype('float16')
 #np_c = np.ones((n, m)).astype('float32')
 
-np_a = np.array(np.array(list(range(k)) * n) % 3).astype('float16')
-np_a.shape = (n, k)
-np_b = np.array(np.array(list(range(k)) * m) % 3).astype('float16')
-np_b.shape = (m, k)
-np_b = np_b.T
-np_c = np.random.randn(n, m).astype('float32')
+#np_a = np.array(np.array(list(range(k)) * n) % 3).astype('float16')
+#np_a.shape = (n, k)
+#np_b = np.array(np.array(list(range(k)) * m) % 3).astype('float16')
+#np_b.shape = (m, k)
+#np_b = np_b.T
+#np_c = np.random.randn(n, m).astype('float32')
 
 nd_a = tvm.nd.array(np_a, tvm.gpu())
 nd_b = tvm.nd.array(np_b, tvm.gpu())

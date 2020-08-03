@@ -11,7 +11,7 @@ int m, n, k;
 
 int main() {
   //std::cin >> m >> n >> k;
-  m = 128;
+  m = 768;
   n = 768;
   k = 3072;
   cublasHandle_t handle;
