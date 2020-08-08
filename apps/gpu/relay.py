@@ -7,10 +7,15 @@ from tvm import relay
 from tvm import autotvm
 
 import topi
+from tvm.contrib import graph_runtime as runtime
 from tvm.relay import op
 
-n, c, h, w = 1, 512, 9, 34
-oc, ic, kh, kw = 512, c, 3, 3
+
+t0, t1 = eval(input())
+n, c, h, w = map(int, t0)
+oc, ic, kh, kw = map(int, t1)
+#n, c, h, w = 1, 2048, 8, 32
+#oc, ic, kh, kw = 1152, c, 1, 1
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
 #var_w = relay.var('w', shape=(oc, ic, kh, kw), dtype='float32')
@@ -37,8 +42,9 @@ def tracer(module, info, is_before):
     #    print('Executes: ', info.name, (time.time() - timing) * 1000)
 
 with tvm.transform.PassContext(opt_level=4, trace=tracer, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]}):
+    print('!!!!!')
     graph, lib, params = tvm.relay.build(module, target='nvptx')
-    from tvm.contrib import graph_runtime as runtime
+    print('????')
     module = runtime.create(graph, lib, tvm.gpu())
 
     x_ =(np.random.randn(n, c, h, w) * 128).astype('float32')

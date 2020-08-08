@@ -37,6 +37,7 @@ import statistics
 
 
 target = 'nvptx'
+#target = 'cuda'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))
@@ -88,8 +89,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
         if bool(is_before):
             timing = time.time()
         else:
-            pass
-            # print('Executes: ', info.name, (time.time() - timing) * 1000)
+            print('Executes: ', info.name, (time.time() - timing) * 1000)
 
     print('Model Load!')
     import tensorizer

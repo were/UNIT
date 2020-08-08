@@ -96,6 +96,5 @@ def rewrite(f, mod, ctx):
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['tir.For', 'tir.AttrStmt']))
-    # print(res)
 
     return res
