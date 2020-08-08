@@ -7,7 +7,7 @@ def _gather_loop_trip_counts(stmt):
         nonlocal axis_dom
         if isinstance(op, tvm.tir.For):
             assert isinstance(op.min, tvm.tir.IntImm)
-            assert isinstance(op.extent, tvm.tir.IntImm)
+            assert isinstance(op.extent, tvm.tir.IntImm), op.extent
             axis_dom.append((op.loop_var, op.min.value, op.extent.value))
         if isinstance(op, tvm.tir.AttrStmt) and op.attr_key == 'thread_extent':
             assert isinstance(op.value, tvm.tir.IntImm)
@@ -43,16 +43,16 @@ def _gather_condition(stmt, axis):
     if not cond:
         return cond
 
-    is_pred = [False]
+    pred = [None]
     def visitor_uses_var(op):
         if isinstance(op, tvm.tir.Var):
             for elem in axis:
                 if tvm.tir.analysis.expr_deep_equal(elem[0], op):
-                    is_pred[0] = True
+                    pred[0] = op
 
     for i in cond:
         tvm.tir.stmt_functor.post_order_visit(i, visitor_uses_var)
-    assert not is_pred[0], "Predication not supported yet!"
+    assert pred[0] is None, ("Predication not supported yet!", cond, pred[0])
 
     return cond
 
@@ -61,7 +61,6 @@ def _gather_condition(stmt, axis):
 def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
-    print(stmt)
 
     def detector(op):
         nonlocal is_init
@@ -97,5 +96,6 @@ def rewrite(f, mod, ctx):
         return None
     
     res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['tir.For', 'tir.AttrStmt']))
+    # print(res)
 
     return res
