@@ -62,6 +62,8 @@ def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
 
+    print(stmt)
+
     def detector(op):
         nonlocal is_init
         if isinstance(op, tvm.tir.For):
