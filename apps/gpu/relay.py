@@ -14,8 +14,8 @@ from tvm.relay import op
 #t0, t1 = eval(input())
 #n, c, h, w = map(int, t0)
 #oc, ic, kh, kw = map(int, t1)
-n, c, h, w = 1, 2048, 7, 7
-oc, ic, kh, kw = 1152, c, 1, 1
+n, c, h, w = 1, 64, 58, 58
+oc, ic, kh, kw = 64, c, 3, 3
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
 #var_w = relay.var('w', shape=(oc, ic, kh, kw), dtype='float32')

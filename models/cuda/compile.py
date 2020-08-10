@@ -68,7 +68,6 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
     input_dict = {'data': input_shape}
     input_name = 'data'
 
-    print('Loading....')
     mod, params = relay.frontend.from_mxnet(sym,
                                             dtype={},
                                             shape=input_dict,
@@ -91,10 +90,9 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
         else:
             print('Executes: ', info.name, (time.time() - timing) * 1000)
 
-    print('Model Load!')
     import tensorizer
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
-                                   trace=tracer, opt_level=4):
+                                   trace=tracer, opt_level=3, disabled_pass=['FoldScaleAxis']):
     #with tvm.transform.PassContext(trace=tracer, opt_level=4):
             graph, lib, params = relay.build_module.build(
                 mod, target=target, params=params)
