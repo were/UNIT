@@ -37,7 +37,7 @@ import statistics
 
 
 target = 'nvptx'
-#target = 'cuda'
+#target = 'cuda -libs=cublas,cudnn'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))

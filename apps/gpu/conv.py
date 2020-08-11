@@ -3,8 +3,8 @@ from tvm import te, arith
 from tensorizer.intrinsics import INTRINSICS
 import numpy as np
 
-n, c, h, w = 1, 16, 10, 66
-kh, kw, ic, ko = 3, 3, c, 128
+n, c, h, w = 1, 512, 10, 10
+kh, kw, ic, ko = 3, 3, c, 512
 
 a = te.placeholder((n, c // 16, h, w, 16), 'float16')
 b = te.placeholder((ko // 16, ic // 16, kh, kw, 16, 16), 'float16')
@@ -106,7 +106,7 @@ with tvm.transform.PassContext(opt_level=4, config={'tir.add_lower_pass': [(1, t
     module = tvm.build(sch, [a, b, conv], 'nvptx')
     fte = module.time_evaluator(module.entry_name, ctx=tvm.gpu(), number=1, repeat=10)
     res = fte(nd_a, nd_b, nd_c).results
-    print(np.mean(res) * 1e6)
+    print('exec: ', np.mean(res) * 1e6)
 
     import functools, operator
     elem_c = functools.reduce(operator.mul, np_c.shape, 1)

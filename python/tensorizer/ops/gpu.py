@@ -158,6 +158,10 @@ def conv2d_NCHW16c_OHWI16o_schedule(attrs, outs, target):
             if w % 32 == 0:
                 _conv2d_schedule_wdim(sch, conv)
             else:
+                print('fused dimensions:')
+                print(get_const_tuple(a.shape))
+                print(get_const_tuple(b.shape))
+                print(get_const_tuple(conv.shape))
                 assert h * w % 32 == 0 and 32 % w == 0
                 _conv2d_schedule_fused(sch, conv)
 
