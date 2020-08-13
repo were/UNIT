@@ -145,37 +145,54 @@ def _conv2d_schedule_fused(sch, conv):
 
 def _conv2d_schedule_wdim(sch, conv):
     a, b = conv.op.input_tensors
-    batch, oc, x, y, ob = list(sch[conv].op.axis)
 
-    cc = sch.cache_write(conv, 'wmma.accumulator')
+    rc = sch[conv].op.reduce_axis[0]
+    rco, rci = sch[conv].split(rc, 64)
+    rcio, rcii = sch[conv].split(rci, 16)
+    rf = sch.rfactor(conv, rcio)
+
+    batch, oc, x, y, ob = list(sch[conv].op.axis)
     yo, yi = sch[conv].split(y, 32)
     oo, oi = sch[conv].split(ob, 16)
     yio, yii = sch[conv].split(yi, 16)
     oio, oii = sch[conv].split(oi, 16)
     oco, oci = sch[conv].split(oc, 2)
-    sch[conv].reorder(batch, x, yo, oco, oo, yio, oci, oio, yii, oii)
+    sch[conv].reorder(batch, x, yo, oco, oo, oci, yio, oio, yii, oii)
+    sch[rf].compute_at(sch[conv], oo)
 
-    sch[cc].compute_at(sch[conv], oco)
-    cb, coc, cx, cy, cob = sch[cc].op.axis
-    crc, crh, crw = sch[cc].op.reduce_axis
+    sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
+    sch[conv].bind(x, te.thread_axis('blockIdx.x'))
+    fused = sch[conv].fuse(oci, yio, oio)
+    sch[conv].bind(fused, te.thread_axis('threadIdx.y'))
+    vo, vi = sch[conv].split(oii, 8)
+    sch[conv].vectorize(vi)
+    fused = sch[conv].fuse(yii, vo)
+    sch[conv].bind(fused, te.thread_axis('threadIdx.x'))
+
+    cc = sch.cache_write(rf, 'wmma.accumulator')
+    sch[cc].compute_at(sch[rf], sch[rf].op.axis[0])
+    sch[rf].bind(sch[rf].op.axis[0], te.thread_axis('threadIdx.y'))
+
+    rc, cb, coc, cx, cy, cob = sch[cc].op.axis
+    crh, crw, crco, crci = sch[cc].op.reduce_axis
     cyo, cyi = sch[cc].split(cy, 16)
-    crco, crci = sch[cc].split(crc, 16)
-    #print(cb, crh, crw, crco, coc, cx, cyo, cyi, cob, crci, sep='\n')
-    sch[cc].reorder(cb, crh, crw, crco, cx, cyo, coc, cyi, cob, crci)
+    sch[cc].reorder(rc, cb, crco, crh, crw, cx, cyo, coc, cyi, cob, crci)
     sch[cc].pragma(cyo, 'tensorize', 'tensorcore')
 
     aa = sch.cache_read(a, 'wmma.matrix_a', [cc])
-    sch[aa].compute_at(sch[cc], crco)
+    sch[aa].compute_at(sch[cc], crw)
     ao, ai = sch[aa].split(sch[aa].op.axis[3], 16)
     sch[aa].pragma(ao, 'tensorize', 'tensorcore.load_a')
     bb = sch.cache_read(b, 'wmma.matrix_b', [cc])
-    sch[bb].compute_at(sch[cc], crco)
+    sch[bb].compute_at(sch[cc], crw)
     sch[bb].pragma(sch[bb].op.axis[0], 'tensorize', 'tensorcore.load_b')
 
-    sch[conv].pragma(yio, 'tensorize', 'tensorcore.store_c')
+    rc, batch, oc, x, y, ob = sch[rf].op.axis
+    yio, yii = sch[rf].split(y, 16)
+    sch[rf].reorder(rc, batch, yio, oc, x, yii, ob)
+    sch[rf].pragma(yio, 'tensorize', 'tensorcore.store_c')
 
-    sch[conv].bind(x, te.thread_axis('blockIdx.x'))
-    sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
+    ir = tvm.lower(sch, [a, b, conv])
 
 
 
