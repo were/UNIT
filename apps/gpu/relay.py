@@ -14,8 +14,8 @@ from tvm.relay import op
 #t0, t1 = eval(input())
 #n, c, h, w = map(int, t0)
 #oc, ic, kh, kw = map(int, t1)
-n, c, h, w = 1, 512, 10, 10
-oc, ic, kh, kw = 512, c, 3, 3
+n, c, h, w = 1, 128, 30, 30
+oc, ic, kh, kw = 128, c, 3, 3
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
 #var_w = relay.var('w', shape=(oc, ic, kh, kw), dtype='float32')
@@ -42,13 +42,15 @@ def tracer(module, info, is_before):
     #    print('Executes: ', info.name, (time.time() - timing) * 1000)
 
 with tvm.transform.PassContext(opt_level=4, trace=tracer, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]}):
+#with tvm.transform.PassContext(opt_level=4, trace=tracer):
+    #graph, lib, params = tvm.relay.build(module, target='cuda -libs=cublas,cudnn')
     graph, lib, params = tvm.relay.build(module, target='nvptx')
     module = runtime.create(graph, lib, tvm.gpu())
 
     x_ =(np.random.randn(n, c, h, w) * 128).astype('float32')
     module.set_input('x', x_)
 
-    timer = module.module.time_evaluator('run', ctx=tvm.gpu(), number=3, repeat=10)
+    timer = module.module.time_evaluator('run', ctx=tvm.gpu(), number=1, repeat=1)
     timed = timer()
 
     print((n * oc * (h - kh + 1) * (w - kw + 1)) * (kh * kw * ic) / timed.mean / 1e9)

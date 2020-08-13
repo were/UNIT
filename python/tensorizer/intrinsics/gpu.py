@@ -171,7 +171,7 @@ write_fp32 = functools.partial(writeback, dtype='float32')
 def _wrap_unroll(axis, stmt):
     for elem in axis:
         idx, _, ext = elem
-        stmt = tvm.tir.For(idx, tvm.tir.const(0, 'int32'), tvm.tir.const(ext, 'int32'), 0, 0, stmt)
+        stmt = tvm.tir.For(idx, tvm.tir.const(0, 'int32'), tvm.tir.const(ext, 'int32'), 0, 3, stmt)
     return stmt
 
 def _flatten_index(axis):

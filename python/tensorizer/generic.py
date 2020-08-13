@@ -56,13 +56,90 @@ def _gather_condition(stmt, axis):
 
     return cond
 
+@tvm.tir.transform.prim_func_pass(opt_level=0)
+def inject_sync(f, mod, ctx):
+
+    def visitor(op):
+        if isinstance(op, tvm.tir.AttrStmt):
+            if op.attr_key == 'pragma_sync':
+                res = [op.body, tvm.tir.Evaluate(tvm.tir.call_intrin('handle', 'tir.tvm_storage_sync', op.value.value))]
+                return tvm.tir.SeqStmt(res)
+
+        return None
+    
+    res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, None, visitor, ['tir.AttrStmt']))
+
+    return res
+
+@tvm.tir.transform.prim_func_pass(opt_level=0)
+def loop_swizzle(f, mod, ctx):
+
+    def visitor(op):
+        if isinstance(op, tvm.tir.AttrStmt):
+            if op.attr_key == 'pragma_swizzle':
+                loop_body = op.body.body
+                replace = {op.body.loop_var: (op.body.loop_var + 1) % op.body.extent}
+                loop_body = tvm.tir.stmt_functor.substitute(loop_body, replace)
+                return tvm.tir.For(op.body.loop_var, op.body.min, op.body.extent, 3, 0, loop_body)
+
+        return None
+    
+    res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, None, visitor, ['tir.AttrStmt']))
+
+    return res
+
+@tvm.tir.transform.prim_func_pass(opt_level=0)
+def sliding_window(f, mod, ctx):
+    shift = []
+
+    def detector(op):
+        nonlocal shift
+        if isinstance(op, tvm.tir.AttrStmt):
+            if op.attr_key == 'pragma_sliding_window':
+                print(op)
+                if op.value.value == 'shift':
+                    shift.append(op.body.loop_var)
+
+        return None
+
+    def visitor(op):
+        nonlocal shift
+        if isinstance(op, tvm.tir.AttrStmt):
+            if op.attr_key == 'pragma_sliding_window':
+                if op.value.value == 'rewrite':
+                    threadIdx_x = tvm.te.thread_axis('threadIdx.x')
+                    axis = shift[0]
+                    ax0_var, ax0_ext = op.body.loop_var, op.body.extent - 1
+                    ax1_var, ax1_ext = op.body.body.loop_var, op.body.body.extent
+                    then_body = tvm.tir.stmt_functor.substitute(op.body.body, {ax0_var: threadIdx_x.var})
+                    load_store = op.body.body.body
+                    store_index = load_store.index
+                    load_index = tvm.tir.stmt_functor.substitute(store_index, {ax0_var: ax0_var + 1})
+                    loop_body = tvm.tir.Store(load_store.buffer_var, tvm.tir.Load(load_store.value.dtype, load_store.buffer_var, load_index), store_index)
+                    loop_body = tvm.tir.For(ax1_var, tvm.tir.const(0, 'int32'), ax1_ext, 0, 0, loop_body)
+                    loop_body = tvm.tir.stmt_functor.substitute(loop_body, {ax0_var: threadIdx_x.var})
+                    loop_body = tvm.tir.IfThenElse(threadIdx_x.var < ax0_ext, loop_body, None)
+                    postlog = tvm.tir.stmt_functor.substitute(op.body.body, {ax0_var: ax0_ext})
+                    postlog = tvm.tir.stmt_functor.substitute(postlog, {ax1_var: threadIdx_x.var})
+                    postlog = tvm.tir.IfThenElse(threadIdx_x.var < ax1_ext, postlog, None)
+                    else_body = tvm.tir.SeqStmt([loop_body, postlog])
+                    res = tvm.tir.IfThenElse(axis == tvm.tir.const(0, 'int32'), then_body, else_body)
+                    res = tvm.tir.AttrStmt(threadIdx_x, 'thread_extent', tvm.tir.const(32, 'int32'), res)
+                    return res
+                else:
+                    return op.body
+
+        return None
+    
+    res = f.with_body(tvm.tir.stmt_functor.ir_transform(f.body, detector, visitor, ['tir.AttrStmt']))
+    print(res)
+
+    return res
 
 @tvm.tir.transform.prim_func_pass(opt_level=0)
 def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
-
-    print(stmt)
 
     def detector(op):
         nonlocal is_init
