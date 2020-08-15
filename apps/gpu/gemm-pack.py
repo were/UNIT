@@ -3,7 +3,7 @@ from tvm import te
 from tensorizer.intrinsics import INTRINSICS
 import numpy as np
 
-n, m, k = 128, 768, 3072
+n, m, k = 64, 192, 1024
 
 a = te.placeholder((n, k), 'float16')
 b = te.placeholder((m // 32, k // 32, 32, 32), 'float16')

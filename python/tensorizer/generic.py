@@ -140,6 +140,7 @@ def sliding_window(f, mod, ctx):
 def rewrite(f, mod, ctx):
     is_init = [False]
     stmt = f.body
+    print(stmt)
 
     def detector(op):
         nonlocal is_init
