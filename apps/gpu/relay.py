@@ -14,18 +14,16 @@ from tvm.relay import op
 #t0, t1 = eval(input())
 #n, c, h, w = map(int, t0)
 #oc, ic, kh, kw = map(int, t1)
-n, c, h, w = 1, 64, 224, 224
-oc, ic, kh, kw = 64, c, 3, 3
+n, c, h, w = 1, 512, 28, 28
+oc, ic, kh, kw = 512, c, 1, 1
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
-#var_w = relay.var('w', shape=(oc, ic, kh, kw), dtype='float32')
-#var_b = relay.var('b', shape=(1, oc, 1, 1), dtype='float32')
 var_w = relay.const(tvm.nd.array((np.random.randn(oc, ic, kh, kw) * 128).astype('float32')))
 var_b = relay.const(tvm.nd.array((np.random.randn(1, oc, 1, 1) * 128).astype('float32')))
-conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(2, 2))
-#biased = relay.add(conv2d, var_b)
-#y = relay.multiply(biased, relay.const(123., 'float32'))
-y = conv2d
+conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(1, 1))
+biased = relay.add(conv2d, var_b)
+y = relay.multiply(biased, relay.const(123., 'float32'))
+#y = conv2d
 
 func = relay.Function([var_x], y)
 module = tvm.IRModule()
@@ -41,7 +39,7 @@ def tracer(module, info, is_before):
     #else:
     #    print('Executes: ', info.name, (time.time() - timing) * 1000)
 
-passes = [(1, tensorizer.rewrite_stride), (1, tensorizer.rewrite)]
+passes = [(1, tensorizer.rewrite)]
 with tvm.transform.PassContext(opt_level=4, trace=tracer, config={'tir.add_lower_pass': passes}):
 #with tvm.transform.PassContext(opt_level=4, trace=tracer):
     #graph, lib, params = tvm.relay.build(module, target='cuda -libs=cublas,cudnn')

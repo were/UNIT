@@ -56,7 +56,7 @@ def conv2d_NCHW16c_OHWI16o_compute(attrs, inputs, out_type):
     strides = attrs.get_int_tuple('strides')
     return [_conv2d_NCHW16c_OHWI16o_impl(inputs[0], inputs[1], strides[0], strides[1], out_type.dtype)]
 
-def _conv2d_schedule_fused(sch, conv, attrs):
+def _conv2d_schedule_fused(sch, conv, output, attrs):
     a, b = conv.op.input_tensors
 
     strides = attrs.get_int_tuple('strides')
@@ -82,7 +82,8 @@ def _conv2d_schedule_fused(sch, conv, attrs):
     rcio, rcii = sch[conv].split(rci, 16)
     rf = sch.rfactor(conv, rcio)
     cc = sch.cache_write(rf, 'wmma.accumulator')
-    
+
+
     batch, oc, x, y, ob = list(sch[conv].op.axis)
     xy = sch[conv].fuse(x, y)
     oco, oci = sch[conv].split(oc, 2)
@@ -91,10 +92,26 @@ def _conv2d_schedule_fused(sch, conv, attrs):
     sch[conv].bind(obo, te.thread_axis('threadIdx.y'))
     sch[conv].bind(xyi, te.thread_axis('threadIdx.x'))
     sch[conv].vectorize(obi)
-    sch[conv].reorder(batch, oco, xyo, oci, xyi)
-    sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
-    sch[conv].bind(xyo, te.thread_axis('blockIdx.x'))
     sch[rf].compute_at(sch[conv], xyo)
+    sch[conv].reorder(batch, oco, xyo, oci, xyi)
+
+    if conv.op == output:
+        sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
+        sch[conv].bind(xyo, te.thread_axis('blockIdx.x'))
+    else:
+        batch, oc, x, y, ob = list(sch[output].op.axis)
+        xy = sch[output].fuse(x, y)
+        oco, oci = sch[output].split(oc, 2)
+        xyo, xyi = sch[output].split(xy, 32)
+        obo, obi = sch[output].split(ob, 4)
+        sch[output].reorder(batch, oco, xyo, oci, xyi)
+        print(batch, oco, xyo, oci, xyi)
+        sch[output].bind(oco, te.thread_axis('blockIdx.y'))
+        sch[output].bind(xyo, te.thread_axis('blockIdx.x'))
+        sch[output].bind(obo, te.thread_axis('threadIdx.y'))
+        sch[output].bind(xyi, te.thread_axis('threadIdx.x'))
+        sch[output].vectorize(obi)
+        sch[conv].compute_at(sch[output], xyo)
 
     rco, batch, oc, x, y, ob = list(sch[rf].op.axis)
 
@@ -134,7 +151,7 @@ def _conv2d_schedule_fused(sch, conv, attrs):
         a_reuse = sch.cache_read(a, 'shared', [cc])
         sch[a_reuse].compute_at(sch[cc], crcio)
         schedule_fetcher(sch, a_reuse, 4, 32)
-        a_shared = sch.cache_read(a, 'shared', [cc])
+        a_shared = sch.cache_read(a_reuse, 'shared', [cc])
         sch[a_shared].compute_at(sch[cc], crw)
         schedule_fetcher(sch, a_shared, 4, 32)
     
@@ -150,7 +167,7 @@ def _conv2d_schedule_fused(sch, conv, attrs):
     sch[bb].compute_at(sch[cc], crw)
     sch[bb].pragma(sch[bb].op.axis[0], 'tensorize', 'tensorcore.load_b')
 
-def _conv2d_schedule_wdim(sch, conv, attrs):
+def _conv2d_schedule_wdim(sch, conv, output, attrs):
     a, b = conv.op.input_tensors
 
     strides = attrs.get_int_tuple('strides')
@@ -161,8 +178,12 @@ def _conv2d_schedule_wdim(sch, conv, attrs):
     else:
         assert False, strides
 
+    for i in [16, 32, 64]:
+        if rc.dom.extent.value % i == 0:
+            split_k = i
+
     rc = sch[conv].op.reduce_axis[0]
-    rco, rci = sch[conv].split(rc, 64)
+    rco, rci = sch[conv].split(rc, split_k)
     rcio, rcii = sch[conv].split(rci, 16)
     rf = sch.rfactor(conv, rcio)
 
@@ -174,15 +195,37 @@ def _conv2d_schedule_wdim(sch, conv, attrs):
     oco, oci = sch[conv].split(oc, 2)
     sch[conv].reorder(batch, x, yo, oco, oo, oci, yio, oio, yii, oii)
     sch[rf].compute_at(sch[conv], oo)
-
-    sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
-    sch[conv].bind(x, te.thread_axis('blockIdx.x'))
     fused = sch[conv].fuse(oci, yio, oio)
     sch[conv].bind(fused, te.thread_axis('threadIdx.y'))
     vo, vi = sch[conv].split(oii, 8)
     sch[conv].vectorize(vi)
     fused = sch[conv].fuse(yii, vo)
     sch[conv].bind(fused, te.thread_axis('threadIdx.x'))
+
+    if conv.op == output:
+        fused = sch[conv].fuse(yo, oco)
+        sch[conv].bind(fused, te.thread_axis('blockIdx.y'))
+        sch[conv].bind(x, te.thread_axis('blockIdx.x'))
+    else:
+        batch, oc, x, y, ob = list(sch[output].op.axis)
+        yo, yi = sch[output].split(y, 32)
+        oo, oi = sch[output].split(ob, 16)
+        yio, yii = sch[output].split(yi, 16)
+        oio, oii = sch[output].split(oi, 16)
+        oco, oci = sch[output].split(oc, 2)
+        sch[output].reorder(batch, x, yo, oco, oo, oci, yio, oio, yii, oii)
+        sch[conv].compute_at(sch[output], oo)
+        fused = sch[output].fuse(yo, oco)
+        sch[output].bind(fused, te.thread_axis('blockIdx.y'))
+        sch[output].bind(x, te.thread_axis('blockIdx.x'))
+
+        fused = sch[output].fuse(oci, yio, oio)
+        sch[output].bind(fused, te.thread_axis('threadIdx.y'))
+        vo, vi = sch[output].split(oii, 8)
+        sch[output].vectorize(vi)
+        fused = sch[output].fuse(yii, vo)
+        sch[output].bind(fused, te.thread_axis('threadIdx.x'))
+
 
     cc = sch.cache_write(rf, 'wmma.accumulator')
     sch[cc].compute_at(sch[rf], sch[rf].op.axis[0])
@@ -195,12 +238,13 @@ def _conv2d_schedule_wdim(sch, conv, attrs):
     sch[cc].pragma(cyo, 'tensorize', 'tensorcore')
 
     if (stride_h, stride_w) != (1, 1):
+        assert isinstance(a.op, tvm.te.ComputeOp), type(a)
         a_icol = a
         aaii = sch.cache_write(a_icol, 'shared')
         sch[aaii].compute_at(sch[cc], crw)
         sch[a_icol].compute_inline()
         fused = sch[aaii].fuse(sch[aaii].op.axis[1], sch[aaii].op.axis[2], sch[aaii].op.axis[3])
-        fo, fi = sch[aaii].split(fused, nparts=4)
+        fo, fi = sch[aaii].split(fused, nparts=(split_k // 16))
         sch[aaii].bind(fo, te.thread_axis('threadIdx.y'))
         fio, fii = sch[aaii].split(fi, nparts=32)
         sch[aaii].bind(fio, te.thread_axis('threadIdx.x'))
@@ -235,22 +279,13 @@ def conv2d_NCHW16c_OHWI16o_schedule(attrs, outs, target):
         if len(list(op.reduce_axis)):
             a, b = op.input_tensors
 
-            if isinstance(a.op, te.ComputeOp):
-                schedule_injective_from_existing(sch, a)
-            if isinstance(b.op, te.ComputeOp):
-                schedule_injective_from_existing(sch, b)
-
             conv = op.output(0)
             n, c, h, w, _ = get_const_tuple(conv.shape)
             if w % 32 == 0:
-                _conv2d_schedule_wdim(sch, conv)
+                _conv2d_schedule_wdim(sch, conv, output, attrs)
             else:
-                print('fused dimensions:')
-                print(get_const_tuple(a.shape))
-                print(get_const_tuple(b.shape))
-                print(get_const_tuple(conv.shape))
                 assert h * w % 32 == 0 and 32 % w == 0
-                _conv2d_schedule_fused(sch, conv, attrs)
+                _conv2d_schedule_fused(sch, conv, output, attrs)
 
     traverse_inline(sch, output, callback)
 
