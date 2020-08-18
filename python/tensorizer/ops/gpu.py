@@ -56,16 +56,8 @@ def conv2d_NCHW16c_OHWI16o_compute(attrs, inputs, out_type):
     strides = attrs.get_int_tuple('strides')
     return [_conv2d_NCHW16c_OHWI16o_impl(inputs[0], inputs[1], strides[0], strides[1], out_type.dtype)]
 
-def _conv2d_schedule_fused(sch, conv, output, attrs):
+def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
     a, b = conv.op.input_tensors
-
-    strides = attrs.get_int_tuple('strides')
-    if len(strides) == 1:
-        stride_h, stride_w = strides[0]
-    elif len(strides) == 2:
-        stride_h, stride_w = strides
-    else:
-        assert False, strides
 
     def schedule_fetcher(sch, buffer, y, x):
         axes = list(sch[buffer].op.axis)
@@ -88,12 +80,13 @@ def _conv2d_schedule_fused(sch, conv, output, attrs):
     xy = sch[conv].fuse(x, y)
     oco, oci = sch[conv].split(oc, 2)
     xyo, xyi = sch[conv].split(xy, 32)
-    obo, obi = sch[conv].split(ob, 4)
-    sch[conv].bind(obo, te.thread_axis('threadIdx.y'))
-    sch[conv].bind(xyi, te.thread_axis('threadIdx.x'))
+    xyio, xyii = sch[conv].split(xyi, 16)
+    obo, obi = sch[conv].split(ob, 8)
+    sch[conv].reorder(batch, oco, xyo, oci, xyio, xyii, obo, obi)
+    sch[conv].bind(sch[conv].fuse(oci, xyio), te.thread_axis('threadIdx.y'))
+    sch[conv].bind(sch[conv].fuse(xyii, obo), te.thread_axis('threadIdx.x'))
     sch[conv].vectorize(obi)
     sch[rf].compute_at(sch[conv], xyo)
-    sch[conv].reorder(batch, oco, xyo, oci, xyi)
 
     if conv.op == output:
         sch[conv].bind(oco, te.thread_axis('blockIdx.y'))
@@ -103,14 +96,14 @@ def _conv2d_schedule_fused(sch, conv, output, attrs):
         xy = sch[output].fuse(x, y)
         oco, oci = sch[output].split(oc, 2)
         xyo, xyi = sch[output].split(xy, 32)
-        obo, obi = sch[output].split(ob, 4)
-        sch[output].reorder(batch, oco, xyo, oci, xyi)
-        print(batch, oco, xyo, oci, xyi)
+        xyio, xyii = sch[output].split(xyi, 16)
+        obo, obi = sch[output].split(ob, 8)
+        sch[output].reorder(batch, oco, xyo, oci, xyio, xyii, obo, obi)
+        sch[output].bind(sch[output].fuse(oci, xyio), te.thread_axis('threadIdx.y'))
+        sch[output].bind(sch[output].fuse(xyii, obo), te.thread_axis('threadIdx.x'))
+        sch[output].vectorize(obi)
         sch[output].bind(oco, te.thread_axis('blockIdx.y'))
         sch[output].bind(xyo, te.thread_axis('blockIdx.x'))
-        sch[output].bind(obo, te.thread_axis('threadIdx.y'))
-        sch[output].bind(xyi, te.thread_axis('threadIdx.x'))
-        sch[output].vectorize(obi)
         sch[conv].compute_at(sch[output], xyo)
 
     rco, batch, oc, x, y, ob = list(sch[rf].op.axis)
@@ -167,17 +160,10 @@ def _conv2d_schedule_fused(sch, conv, output, attrs):
     sch[bb].compute_at(sch[cc], crw)
     sch[bb].pragma(sch[bb].op.axis[0], 'tensorize', 'tensorcore.load_b')
 
-def _conv2d_schedule_wdim(sch, conv, output, attrs):
+def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
     a, b = conv.op.input_tensors
 
-    strides = attrs.get_int_tuple('strides')
-    if len(strides) == 1:
-        stride_h, stride_w = strides[0]
-    elif len(strides) == 2:
-        stride_h, stride_w = strides
-    else:
-        assert False, strides
-
+    rc = sch[conv].op.reduce_axis[0]
     for i in [16, 32, 64]:
         if rc.dom.extent.value % i == 0:
             split_k = i
@@ -220,7 +206,11 @@ def _conv2d_schedule_wdim(sch, conv, output, attrs):
         sch[output].bind(x, te.thread_axis('blockIdx.x'))
 
         fused = sch[output].fuse(oci, yio, oio)
-        sch[output].bind(fused, te.thread_axis('threadIdx.y'))
+        if rf_rw:
+            fo, fi = sch[output].split(fused, nparts=conv.op.reduce_axis[2].dom.extent.value)
+        else:
+            fo, fi = sch[output].split(fused, nparts=(split_k // 16))
+        sch[output].bind(fo, te.thread_axis('threadIdx.y'))
         vo, vi = sch[output].split(oii, 8)
         sch[output].vectorize(vi)
         fused = sch[output].fuse(yii, vo)
@@ -281,11 +271,12 @@ def conv2d_NCHW16c_OHWI16o_schedule(attrs, outs, target):
 
             conv = op.output(0)
             n, c, h, w, _ = get_const_tuple(conv.shape)
+            stride_h, stride_w = attrs.get_int_tuple('strides')
             if w % 32 == 0:
-                _conv2d_schedule_wdim(sch, conv, output, attrs)
+                _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w)
             else:
                 assert h * w % 32 == 0 and 32 % w == 0
-                _conv2d_schedule_fused(sch, conv, output, attrs)
+                _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w)
 
     traverse_inline(sch, output, callback)
 

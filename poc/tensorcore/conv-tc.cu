@@ -1,7 +1,10 @@
 #include <cuda.h>
+#include <cuda_device_runtime_api.h>
 #include <iostream>
 #include <cassert>
 #include "cudnn.h"
+
+#include "../util.h"
 
 #define checkCudnnErr(x)                     \
   do {                                       \
@@ -37,34 +40,28 @@ int main() {
   int dimB[4];
   std::cin >> dimA[0] >> dimA[1] >> dimA[2] >> dimA[3];
   std::cin >> dimB[0] >> dimB[1] >> dimB[2] >> dimB[3];
-  int strideA[4] = {0, 0, 0, 1};
-  for (int i = 2; i >= 0; --i) {
-    strideA[i] = strideA[i + 1] * dimA[i];
-  }
 
-  int pad[2] = {0};
+  int pad[2] = {0, 0};
   int stride[2];
   int dilation[2] = {1, 1};
 
   std::cin >> stride[0] >> stride[1];
 
   int dimY[4] = {dimA[0], dimB[0], (dimA[2] - dimB[2]) / stride[0] + 1, (dimA[3] - dimB[3]) / stride[1] + 1};
-  int strideY[4] = {0, 0, 0, 1};
-  for (int i = 2; i >= 0; --i) {
-    strideY[i] = strideY[i + 1] * dimY[i];
-  }
 
-  checkCudnnErr( cudnnSetConvolution2dDescriptor(convDesc, pad[0], pad[1], stride[0], stride[1], dilation[0], dilation[1], CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT) );
+  checkCudnnErr( cudnnSetTensor4dDescriptor(xDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_HALF,
+    dimA[0], dimA[1], dimA[2], dimA[3]) );
+  assert(dimA[1] == dimB[1]);
+  checkCudnnErr( cudnnSetFilter4dDescriptor(wDesc, CUDNN_DATA_HALF, CUDNN_TENSOR_NCHW,
+    dimB[0], dimB[1], dimB[2], dimB[3]) );
+  checkCudnnErr( cudnnSetTensor4dDescriptor(yDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_HALF,
+    dimY[0], dimY[1], dimY[2], dimY[3]) );
 
-  checkCudnnErr( cudnnSetTensor4dDescriptor(xDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, dimA[0], dimA[1], dimA[2], dimA[3]) );
-  checkCudnnErr( cudnnSetFilter4dDescriptor(wDesc, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW, dimB[0], dimB[1], dimB[2], dimB[3]) );
-  checkCudnnErr( cudnnSetTensor4dDescriptor(yDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, dimY[0], dimY[1], dimY[2], dimY[3]) );
-
-  void *x, *w, *y;
+  void *x = nullptr, *w = nullptr, *y = nullptr;
   // Allocate and initialize tensors (again, only the input tensor is shown):
-  checkCudaErr(cudaMalloc(&x, strideA[0] * sizeof(float)));
+  checkCudaErr(cudaMalloc(&x, dimA[0] * dimA[1] * dimA[2] * dimA[3] * sizeof(float)));
   checkCudaErr(cudaMalloc(&w, dimB[0] * dimB[1] * dimB[2] * dimB[3] * sizeof(float)));
-  checkCudaErr(cudaMalloc(&w, strideY[0] * sizeof(float)));
+  checkCudaErr(cudaMalloc(&y, dimY[0] * dimY[1] * dimY[2] * dimY[3] * sizeof(float)));
 
 
   // Set the compute data type (below as CUDNN_DATA_FLOAT):
@@ -72,16 +69,17 @@ int main() {
                                                  pad[0], pad[1],
                                                  stride[0], stride[1],
                                                  dilation[0], dilation[1],
-                                                 CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
+                                                 CUDNN_CROSS_CORRELATION, CUDNN_DATA_HALF));
+  checkCudnnErr( cudnnSetConvolutionGroupCount(convDesc, 1) );
 
   // Set the math type to allow cuDNN to use Tensor Cores:
   checkCudnnErr( cudnnSetConvolutionMathType(convDesc, CUDNN_TENSOR_OP_MATH) );
 
   // Choose a supported algorithm:
-  cudnnConvolutionFwdAlgo_t algo = CUDNN_CONVOLUTION_FWD_ALGO_DIRECT;
+  cudnnConvolutionFwdAlgo_t algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
 
   size_t workSpaceSize;
-  void *workSpace;
+  void *workSpace = nullptr;
   assert(handle);
   assert(xDesc);
   assert(wDesc);
@@ -93,17 +91,35 @@ int main() {
                                                          yDesc, algo, &workSpaceSize) );
 
   if (workSpaceSize > 0) {
-     cudaMalloc(&workSpace, workSpaceSize);
+    cudaMalloc(&workSpace, workSpaceSize);
   }
 
   float alpha = 1.0;
   float beta = 0.0;
 
+  assert(x);
+  assert(w);
+  assert(y);
   // Invoke the convolution:
-  checkCudnnErr( cudnnConvolutionForward(handle, (void*)(&alpha), xDesc, x,
+  checkCudnnErr( cudnnConvolutionForward(handle, (void*)(&alpha),
+                                         xDesc, x,
                                          wDesc, w, convDesc, algo,
-                                         workSpace, workSpaceSize, (void*)(&beta),
+                                         workSpace, workSpaceSize,
+                                         (void*)(&beta),
                                          yDesc, y) );
+  cudaDeviceSynchronize();
+  begin_roi();
+  checkCudnnErr( cudnnConvolutionForward(handle, (void*)(&alpha),
+                                         xDesc, x,
+                                         wDesc, w, convDesc, algo,
+                                         workSpace, workSpaceSize,
+                                         (void*)(&beta),
+                                         yDesc, y) );
+  checkCudaErr(cudaDeviceSynchronize());
+  auto elps = end_roi();
+  std::cout << "Exec: " << elps << "us" << std::endl;
+  std::cout << ((double) dimY[0] * dimY[1] * dimY[2] * dimY[3] * dimB[1] * dimB[2] * dimB[3]) / elps / 1000.
+            << " GFLOP/s" << std::endl;
 
   return 0;
 }
