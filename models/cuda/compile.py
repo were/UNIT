@@ -36,7 +36,7 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'nvptx'
+target = 'nvptx -libs=cublas,cudnn'
 #target = 'cuda -libs=cublas,cudnn'
 
 def load_model(symbol_file, param_file, logger=None):

@@ -14,13 +14,13 @@ from tvm.relay import op
 #t0, t1 = eval(input())
 #n, c, h, w = map(int, t0)
 #oc, ic, kh, kw = map(int, t1)
-n, c, h, w = 1, 512, 7, 7
-oc, ic, kh, kw = 512, c, 3, 3
+n, c, h, w = 1, 4, 224, 224
+oc, ic, kh, kw = 64, c, 7, 7
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
 var_w = relay.const(tvm.nd.array((np.random.randn(oc, ic, kh, kw) * 128).astype('float32')))
 var_b = relay.const(tvm.nd.array((np.random.randn(1, oc, 1, 1) * 128).astype('float32')))
-conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(1, 1))
+conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(2, 2))
 biased = relay.add(conv2d, var_b)
 y = relay.multiply(biased, relay.const(123., 'float32'))
 #y = conv2d
@@ -43,7 +43,7 @@ passes = [(1, tensorizer.rewrite)]
 with tvm.transform.PassContext(opt_level=4, trace=tracer, config={'tir.add_lower_pass': passes}):
 #with tvm.transform.PassContext(opt_level=4, trace=tracer):
     #graph, lib, params = tvm.relay.build(module, target='cuda -libs=cublas,cudnn')
-    graph, lib, params = tvm.relay.build(module, target='nvptx')
+    graph, lib, params = tvm.relay.build(module, target='nvptx -libs=cublas,cudnn')
     module = runtime.create(graph, lib, tvm.gpu())
 
     x_ =(np.random.randn(n, c, h, w) * 128).astype('float32')

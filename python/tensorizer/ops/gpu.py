@@ -206,10 +206,7 @@ def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
         sch[output].bind(x, te.thread_axis('blockIdx.x'))
 
         fused = sch[output].fuse(oci, yio, oio)
-        if rf_rw:
-            fo, fi = sch[output].split(fused, nparts=conv.op.reduce_axis[2].dom.extent.value)
-        else:
-            fo, fi = sch[output].split(fused, nparts=(split_k // 16))
+        fo, fi = sch[output].split(fused, nparts=(split_k // 16))
         sch[output].bind(fo, te.thread_axis('threadIdx.y'))
         vo, vi = sch[output].split(oii, 8)
         sch[output].vectorize(vi)
