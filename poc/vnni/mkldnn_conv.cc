@@ -37,7 +37,7 @@ memory::dim product(const memory::dims &dims) {
             std::multiplies<memory::dim>());
 }
 
-void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw) {
+void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw, int sh, int sw) {
     using tag = memory::format_tag;
     using dt = memory::data_type;
 
@@ -53,8 +53,8 @@ void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw) {
     memory::dims conv_src_tz = {batch, ic, h, w};
     memory::dims conv_weights_tz = {oc, ic, kh, kw};
     memory::dims conv_bias_tz = {oc};
-    memory::dims conv_dst_tz = {batch, oc, h - kh + 1, w - kw + 1};
-    memory::dims conv_strides = {1, 1};
+    memory::dims conv_dst_tz = {batch, oc, (h - kh) / sh + 1, (w - kw) / sw + 1};
+    memory::dims conv_strides = {sh, sw};
     memory::dims conv_padding = {0, 0};
     //[Configure tensor shapes]
 
@@ -234,6 +234,12 @@ void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw) {
 
     s.wait();
 
+    auto conv = convolution_forward(conv_prim_desc);
+    conv.execute(s,
+            {{MKLDNN_ARG_SRC, conv_src_memory},
+                    {MKLDNN_ARG_WEIGHTS, conv_weights_memory},
+                    {MKLDNN_ARG_BIAS, conv_bias_memory},
+                    {MKLDNN_ARG_DST, conv_dst_memory}});
     begin_roi();
     /// Create the convolution primitive and add it to the net. The int8 example
     /// computes the same Convolution +ReLU layers from AlexNet simple-net.cpp
@@ -242,7 +248,6 @@ void simple_net_int8(int batch, int ic, int h, int w, int oc, int kh, int kw) {
     /// similar results.
     /// @snippet cpu_cnn_inference_int8.cpp Create convolution primitive
     //[Create convolution primitive]
-    auto conv = convolution_forward(conv_prim_desc);
     conv.execute(s,
             {{MKLDNN_ARG_SRC, conv_src_memory},
                     {MKLDNN_ARG_WEIGHTS, conv_weights_memory},
@@ -285,11 +290,13 @@ int main(int argc, char **argv) {
 
         int ic = 64, h = 128, w = 128;
         int oc = 64, kh = 3, kw = 3;
-        std::cin >> h >> w >> ic;
-        std::cin >> kh >> kw >> oc;
+	int sh = 1, sw = 1;
+        std::cin >> ic >> h >> w;
+        std::cin >> oc >> kh >> kw;
+	std::cin >> sh >> sw;
 
-        simple_net_int8(batch, ic, h, w, oc, kh, kw);
-        simple_net_int8(batch, ic, h, w, oc, kh, kw);
+        simple_net_int8(batch, ic, h, w, oc, kh, kw, sh, sw);
+        //simple_net_int8(batch, ic, h, w, oc, kh, kw, sh, sw);
     } catch (error &e) {
         std::cerr << "status: " << e.status << std::endl;
         std::cerr << "message: " << e.message << std::endl;

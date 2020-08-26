@@ -36,8 +36,9 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'llvm -mcpu=cascadelake -libs=cblas'
-# target = 'llvm -mattr=+avx512f'
+#target = 'llvm -mcpu=cascadelake -libs=cblas'
+#target = 'llvm -mattr=+avx512f'
+target = 'llvm -mattr=+avx512f'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))
@@ -94,7 +95,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
 
     print('Model Load!')
     import tensorizer
-    with tvm.transform.PassContext(disabled_pass={'FuseOps'}, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
+    with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3):
             graph, lib, params = relay.build_module.build(
                 mod, target=target, params=params)
