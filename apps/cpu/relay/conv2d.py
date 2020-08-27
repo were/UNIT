@@ -29,28 +29,42 @@ module['main'] = func
 import time
 timing = -1
 def tracer(module, info, is_before):
+    return
     global timing
     if bool(is_before):
         timing = time.time()
     else:
         print('Executes: ', info.name, (time.time() - timing) * 1000)
 
-with tvm.transform.PassContext(opt_level=3, trace=tracer, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]}):
-    graph, lib, params = tvm.relay.build(module, target='llvm -mcpu=cascadelake')
-    #from tvm.contrib import graph_runtime as runtime
-    from tvm.contrib.debugger import debug_runtime as runtime
-    module = runtime.create(graph, lib, tvm.cpu())
+result = 1e9
+target = -1
+from tensorizer import tune
+tune.cpu_idx = 0
+while True:
+    with tvm.transform.PassContext(opt_level=3, trace=tracer, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]}):
+        graph, lib, params = tvm.relay.build(module, target='llvm -mcpu=cascadelake')
+        #from tvm.contrib import graph_runtime as runtime
+        from tvm.contrib.debugger import debug_runtime as runtime
+        func = runtime.create(graph, lib, tvm.cpu())
 
-    x_ = (np.random.randn(n, c, h, w) * 128).astype('int8')
-    module.set_input('x', x_)
-    module.run()
-    module.run()
-    module.run()
-    module.run()
-    module.run()
+        x_ = (np.random.randn(n, c, h, w) * 128).astype('int8')
+        func.set_input('x', x_)
 
-    #timer = module.module.time_evaluator('run', ctx=tvm.cpu(0), number=3, repeat=10)
-    #timed = timer()
+        timer = func.module.time_evaluator('run', ctx=tvm.cpu(0), number=3, repeat=10)
+        timed = timer()
 
-    #print(timed.mean * 1e6)
-    #print((n * oc * (h - kh + 1) * (w - kw + 1)) * (kh * kw * ic) / timed.mean / 1e9)
+        if timed.mean < result:
+            result = timed.mean
+            target = tune.cpu_idx
+
+    relay.backend.compile_engine.get().clear()
+    tune.cpu_idx += 1
+    if tune.cpu_idx - target > 8:
+        break
+    if tune.cpu_idx >= tune.total_idx:
+        break
+
+with open('/home/ubuntu/Tensorization-PoC/cpu-tune.log', 'a') as f:
+    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {target}\n')
+
+print(result, target, tune.cpu_idx)

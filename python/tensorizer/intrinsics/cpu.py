@@ -2,6 +2,8 @@ import tvm
 from tvm import te
 from .analyzer import _index2ramps
 import functools
+from .. import tune
+from topi import get_const_tuple
 
 def initializer(store, axis, dtype, lanes):
     ramps = _index2ramps(store.index, axis)
@@ -46,7 +48,7 @@ def writer(store, axis, operands, llvm_intrin, dtype):
                                     *operands)
     return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
-def schedule(outs, pattern, pragma, max_threads):
+def schedule(outs, attrs, pattern, pragma, max_threads):
 
     from topi.util import traverse_inline
     sch = tvm.te.create_schedule([i.op for i in outs])
@@ -61,7 +63,23 @@ def schedule(outs, pattern, pragma, max_threads):
             #for x in points[::-1]:
             #    print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
             #    print(x[-1])
-            to_apply = points[-1][-1]
+
+            a, b = op.input_tensors
+            tune.ashape = get_const_tuple(a.shape)
+            tune.bshape = get_const_tuple(b.shape)
+            try:
+                tune.strides = attrs.get_int_tuple('strides')
+            except:
+                tune.strides = 'dense'
+
+            if tune.cpu_idx is None:
+                to_apply = points[-1][-1]
+                with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
+                    f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
+            else:
+                tune.total_idx = len(points)
+                to_apply = points[tune.cpu_idx][-1]
+
             to_schedule = output
             loops = []
             parallel_level = None
