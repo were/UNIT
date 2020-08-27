@@ -48,7 +48,7 @@ def writer(store, axis, operands, llvm_intrin, dtype):
                                     *operands)
     return tvm.tir.Store(store.buffer_var, vnni, ramps[0])
 
-def schedule(outs, attrs, pattern, pragma, max_threads):
+def schedule(outs, strides, pattern, pragma, max_threads):
 
     from topi.util import traverse_inline
     sch = tvm.te.create_schedule([i.op for i in outs])
@@ -60,6 +60,7 @@ def schedule(outs, attrs, pattern, pragma, max_threads):
             points = list(analyze_tiling(op, pattern))
             fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])
             points.sort(key=fobj)
+            points = points[::-1]
             #for x in points[::-1]:
             #    print((2 ** -x[0]), (2 ** -x[1]), x[2], (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3]))
             #    print(x[-1])
@@ -68,14 +69,16 @@ def schedule(outs, attrs, pattern, pragma, max_threads):
             tune.ashape = get_const_tuple(a.shape)
             tune.bshape = get_const_tuple(b.shape)
             try:
-                tune.strides = attrs.get_int_tuple('strides')
+                tune.strides = strides
             except:
                 tune.strides = 'dense'
 
             if tune.cpu_idx is None:
-                to_apply = points[-1][-1]
-                with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
-                    f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
+                to_apply = points[0][-1]
+                #with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
+                #    f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
+                if (tune.ashape, tune.bshape, tune.strides) in tune.x86.keys():
+                    to_apply = points[tune.x86[(tune.ashape, tune.bshape, tune.strides)]][-1]
             else:
                 tune.total_idx = len(points)
                 to_apply = points[tune.cpu_idx][-1]

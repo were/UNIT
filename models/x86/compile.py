@@ -95,6 +95,7 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
 
     print('Model Load!')
     import tensorizer
+    from tensorizer import tune
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3):
             graph, lib, params = relay.build_module.build(
