@@ -168,6 +168,10 @@ def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
         if rc.dom.extent.value % i == 0:
             split_k = i
 
+    if stride_h != 1 or stride_w != 1:
+        split_k = 16
+
+
     rc = sch[conv].op.reduce_axis[0]
     rco, rci = sch[conv].split(rc, split_k)
     rcio, rcii = sch[conv].split(rci, 16)

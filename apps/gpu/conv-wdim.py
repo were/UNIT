@@ -4,8 +4,8 @@ from tensorizer.intrinsics import INTRINSICS
 import numpy as np
 from topi.util import get_const_tuple
 
-n, c, h, w = 1, 128, 25, 66
-kh, kw, ic, ko = 3, 3, c, 128
+n, c, h, w = 1, 192, 18, 34
+kh, kw, ic, ko = 3, 3, c, 192
 stride_h = stride_w = 1
 
 a = te.placeholder((n, c // 16, h, w, 16), 'float16')
