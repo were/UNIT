@@ -136,8 +136,13 @@ if __name__ == '__main__':
     parser.add_argument('--data-layer-type', type=str, default="float32",
                         choices=['float32', 'int8', 'uint8'],
                         help='data type for data layer')
+    parser.add_argument('--target', type=str, default=None,
+                        help='baseline or tensorization')
 
     args = parser.parse_args()
+
+    if args.target is not None:
+        target = args.target + " -libs=cudnn,cublas"
 
     if args.ctx == 'gpu':
         ctx = mx.gpu(0)
