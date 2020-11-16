@@ -62,7 +62,6 @@ def load_model(symbol_file, param_file, logger=None):
 
 
 def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
-    tune = False
 
     input_shape = [1] + list(data_shape)
     input_dict = {'data': input_shape}
@@ -91,6 +90,8 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
             print('Executes: ', info.name, (time.time() - timing) * 1000)
 
     import tensorizer
+    from tensorizer import tune
+    tune.enable = True
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3, disabled_pass=['FoldScaleAxis']):
     #with tvm.transform.PassContext(trace=tracer, opt_level=4):

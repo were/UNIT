@@ -118,14 +118,17 @@ int main() {
                                          yDesc, y) );
   cudaDeviceSynchronize();
   begin_roi();
-  checkCudnnErr( cudnnConvolutionForward(handle, (void*)(&alpha),
-                                         xDesc, x,
-                                         wDesc, w, convDesc, algo,
-                                         workSpace, workSpaceSize,
-                                         (void*)(&beta),
-                                         yDesc, y) );
-  checkCudaErr(cudaDeviceSynchronize());
-  auto elps = end_roi();
+  for (int i = 0; i < 10; ++i) {
+    checkCudnnErr( cudnnConvolutionForward(handle, (void*)(&alpha),
+                                           xDesc, x,
+                                           wDesc, w, convDesc, algo,
+                                           workSpace, workSpaceSize,
+                                           (void*)(&beta),
+                                           yDesc, y) );
+    checkCudaErr(cudaDeviceSynchronize());
+  }
+  double elps = end_roi();
+  elps /= 10.;
   std::cout << "Exec: " << elps << "us" << std::endl;
   std::cout << ((double) dimY[0] * dimY[1] * dimY[2] * dimY[3] * dimB[1] * dimB[2] * dimB[3]) / elps / 1000.
             << " GFLOP/s" << std::endl;
