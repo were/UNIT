@@ -75,8 +75,15 @@ def schedule(outs, strides, pattern, pragma, max_threads):
 
             if tune.cpu_idx is None:
                 to_apply = points[0][-1]
-                #with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
-                #    f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
+                import os
+                HOME = os.getenv("HOME")
+                try:
+                    f = open(HOME + '/Tensorization-PoC/cpu-shapes.log', 'a')
+                except:
+                    f = open(HOME + '/UNIT/cpu-shapes.log', 'a')
+                except:
+                    assert False
+                f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
                 if (tune.ashape, tune.bshape, tune.strides) in tune.x86.keys():
                     to_apply = points[tune.x86[(tune.ashape, tune.bshape, tune.strides)]][-1]
             else:
