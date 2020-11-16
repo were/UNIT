@@ -13,16 +13,16 @@ from tvm.relay import op
 #t0, t1 = eval(input())
 #n, c, h, w = map(int, t0)
 #oc, ic, kh, kw = map(int, t1)
-n, c, h, w = 1, 192, 16, 16
-oc, ic, kh, kw = 192, c, 3, 3
+n, c, h, w, oc, ic, kh, kw, sh, sw = map(int, input().split())
+
+oh = (h - kh) // sh + 1
+ow = (w - kw) // sw + 1
 
 var_x = relay.var('x', shape=(n, c, h, w), dtype='float32')
 var_w = relay.const(tvm.nd.array((np.random.randn(oc, ic, kh, kw) * 128).astype('float32')))
 var_b = relay.const(tvm.nd.array((np.random.randn(1, oc, 1, 1) * 128).astype('float32')))
-conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(1, 1))
-biased = relay.add(conv2d, var_b)
-y = relay.multiply(biased, relay.const(123., 'float32'))
-#y = conv2d
+conv2d = relay.nn.conv2d(var_x, var_w, out_dtype='float32', kernel_size=(kh, kw), channels=oc, strides=(sh, sw))
+y = conv2d
 
 func = relay.Function([var_x], y)
 module = tvm.IRModule()
@@ -38,25 +38,55 @@ def tracer(module, info, is_before):
     #else:
     #    print('Executes: ', info.name, (time.time() - timing) * 1000)
 
-for i in ['fuse', 'pad']:
-    for j in [16, 32, 64]:
-        from tensorizer import tune
+from tensorizer import tune
+tune.enable = False
+
+
+def run():
+    passes = [(1, tensorizer.rewrite)]
+    with tvm.transform.PassContext(opt_level=3, trace=tracer, config={'tir.add_lower_pass': passes}):
+    #with tvm.transform.PassContext(opt_level=4, trace=tracer):
+        #graph, lib, params = tvm.relay.build(module, target='cuda -libs=cublas,cudnn')
+        graph, lib, params = tvm.relay.build(module, target='nvptx -libs=cublas,cudnn')
+        #from tvm.contrib import graph_runtime as runtime
+        from tvm.contrib.debugger import debug_runtime as runtime
+        func = runtime.create(graph, lib, tvm.gpu())
+
+
+        x_ =(np.random.randn(n, c, h, w) * 128).astype('float32')
+        func.set_input('x', x_)
+        #timer = func.module.time_evaluator('run', ctx=tvm.gpu(), number=1, repeat=10)
+        timed = []
+        for i in range(10):
+            func.run()
+            for node, time in zip(func.debug_datum._nodes_list, func.debug_datum._time_list):
+                if 'conv2d' in node['name']:
+                    timed.append(time[0])
+        #timed = timer()
+        #while np.var(timed.results) > 1e-5:
+        #    timed = timer()
+        return np.mean(timed)
+
+base = None
+timed = run()
+base = timed * 1e6
+relay.backend.compile_engine.get().clear()
+
+results = []
+for i in [None, 'fuse', 'pad'] if ow < 32 else [None]:
+    j = 16
+    while True:
         tune.padding = i
         tune.splitk = j
-        passes = [(1, tensorizer.rewrite)]
-        with tvm.transform.PassContext(opt_level=3, trace=tracer, config={'tir.add_lower_pass': passes}):
-        #with tvm.transform.PassContext(opt_level=4, trace=tracer):
-            #graph, lib, params = tvm.relay.build(module, target='cuda -libs=cublas,cudnn')
-            graph, lib, params = tvm.relay.build(module, target='nvptx -libs=cublas,cudnn')
-            print('compiled')
-            from tvm.contrib import graph_runtime as runtime
-            #from tvm.contrib.debugger import debug_runtime as runtime
-            func = runtime.create(graph, lib, tvm.gpu())
+        timed = run()
 
-            x_ =(np.random.randn(n, c, h, w) * 128).astype('float32')
-            func.set_input('x', x_)
-            timer = func.module.time_evaluator('run', ctx=tvm.gpu(), number=1, repeat=10)
-            timed = timer()
+        results.append(((i, j), timed * 1e6))
 
-            print((n * oc * (h - kh + 1) * (w - kw + 1)) * (kh * kw * ic) / timed.mean / 1e9)
-            print('%d us' % int(timed.mean * 1e6))
+        relay.backend.compile_engine.get().clear()
+        j <<= 1
+        if j > tune.total_idx:
+            break
+
+with open('/home/ubuntu/gpu-tune.log', 'a') as f:
+    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {results}, {base}\n')
+    f.write(f'{n} {c} {h} {w} {oc} {ic} {kh} {kw} {sh} {sw} {results}, {base}\n')
