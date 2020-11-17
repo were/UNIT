@@ -79,12 +79,12 @@ def advance_data_iter(data_iter, n):
 
 
 def profile(num_inference_images, prefix):
-    debug = True
+    debug = False
     # np.random.seed(0)
 
-    static_net = mx.gluon.SymbolBlock.imports('{}.json'.format(prefix),
+    static_net = mx.gluon.SymbolBlock.imports('{}-symbol.json'.format(prefix),
                                     ['data0', 'data1', 'data2'],
-                                    '{}.params'.format(prefix))
+                                    '{}-0000.params'.format(prefix))
     static_net.hybridize(static_alloc=True, static_shape=True)
     mx_ctx = mx.cpu()
 
@@ -100,9 +100,12 @@ def profile(num_inference_images, prefix):
     inputs_nd = mx.nd.array(inputs, ctx=mx_ctx)
     token_types_nd = mx.nd.array(token_types, ctx=mx_ctx)
     valid_length_nd = mx.nd.array(valid_length, ctx=mx_ctx)
-    mx_out = static_net(inputs_nd, token_types_nd, valid_length_nd.astype('float32'))
-    mx_out.wait_to_read()
-    print(mx_out)
+    import datetime
+    begin_roi = datetime.datetime.now()
+    for i in range(10):
+        mx_out = static_net(inputs_nd, token_types_nd, valid_length_nd.astype('float32'))
+        mx_out.wait_to_read()
+    print((datetime.datetime.now() - begin_roi) / 10 * 1000)
 
     import tvm
     if debug:
@@ -113,9 +116,9 @@ def profile(num_inference_images, prefix):
     
     base = os.getcwd() + '/compiled/' + prefix.split("/")[-1]
 
-    path_lib = base + '_deploy_lib.tar'
-    path_graph =  base + '_deploy_graph.json'
-    path_params = base + '_deploy_params.params'
+    path_lib = base + '-symbol_deploy_lib.tar'
+    path_graph =  base + '-symbol_deploy_graph.json'
+    path_params = base + '-symbol_deploy_params.params'
 
     graph = open(path_graph).read()
     lib = tvm.runtime.load_module(path_lib)

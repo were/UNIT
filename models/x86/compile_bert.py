@@ -170,9 +170,8 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape, tune):
 
     import tensorizer
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
-            opt_level=4):
-        graph, lib, params = relay.build_module.build(
-            mod, target=target, params=params)
+                                   opt_level=4):
+        graph, lib, params = relay.build_module.build(mod, target=target, params=params)
 
         base_dir = os.getcwd() + "/compiled"
         pathlib.Path(base_dir).mkdir(parents=True, exist_ok=True)

@@ -1,3 +1,5 @@
+model = None
+
 cpu_idx = None
 total_idx = None
 padding = None

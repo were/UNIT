@@ -36,7 +36,8 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'llvm -mcpu=cascadelake -libs=cblas'
+target = 'llvm -mcpu=cascadelake'
+#target = 'llvm -mcpu=cascadelake -libs=mkldnn'
 #target = 'llvm -mattr=+avx512f'
 #target = 'llvm -mattr=+avx512f'
 
@@ -92,10 +93,11 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
             timing = time.time()
         else:
             print('Executes: ', info.name, (time.time() - timing) * 1000)
-
     print('Model Load!')
     import tensorizer
     from tensorizer import tune
+    tune.model = symbol_file
+    #tune.cpu_idx = 0
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3):
             graph, lib, params = relay.build_module.build(

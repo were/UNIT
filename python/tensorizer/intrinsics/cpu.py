@@ -57,7 +57,7 @@ def schedule(outs, strides, pattern, pragma, max_threads):
     def callback(op):
         if len(list(op.reduce_axis)):
             from .looptiler import analyze_tiling
-            points = list(analyze_tiling(op, pattern))
+            points = list(analyze_tiling(op, pattern, max_parallel=max_threads))
             fobj = lambda x: (2 ** -x[0]) * (2 ** -x[1]) * x[2] * (x[3] * x[3] if 2 <= x[3] <= 8 else 1.0 / x[3])
             points.sort(key=fobj)
             points = points[::-1]
@@ -76,7 +76,7 @@ def schedule(outs, strides, pattern, pragma, max_threads):
             if tune.cpu_idx is None:
                 to_apply = points[0][-1]
                 #with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
-                #    f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
+                #    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {tune.model}\n')
                 if (tune.ashape, tune.bshape, tune.strides) in tune.x86.keys():
                     to_apply = points[tune.x86[(tune.ashape, tune.bshape, tune.strides)]][-1]
             else:
@@ -161,11 +161,15 @@ def schedule(outs, strides, pattern, pragma, max_threads):
             for i in unroll:
                 sch[op].unroll(i)
             sch[op].pragma(stencil[0], 'tensorize', pragma)
+            #if simple:
+            #    unroll = [simple[-1]] + unroll
+            #    simple = simple[:-1]
             if str(op) != str(output):
-                # print(simple, reduction, unroll, stencil, sep='\n')
-                sch[op].reorder(*(simple + reduction + unroll + stencil))
+                #sch[op].reorder(*(simple + reduction + unroll + stencil))
+                sch[op].reorder(*(simple + unroll + reduction + stencil))
             else:
-                sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
+                #sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
+                sch[op].reorder(*([fusion] + unroll + simple + reduction + stencil))
 
     traverse_inline(sch, output, callback)
 
@@ -175,11 +179,11 @@ x86_init = functools.partial(initializer, dtype='int32', lanes=16)
 x86_loader = functools.partial(loader, cast_type='int32x16')
 x86_writeback = functools.partial(writer, llvm_intrin='llvm.x86.avx512.vpdpbusd.512', dtype='int32x16')
 from .pattern import x86_vnni
-x86_schedule = functools.partial(schedule, pattern=x86_vnni, pragma='vnni', max_threads=10000)
+x86_schedule = functools.partial(schedule, pattern=x86_vnni, pragma='vnni', max_threads=5000)
 
 arm_init = functools.partial(initializer, dtype='int32', lanes=4)
 arm_acc = functools.partial(loader, cast_type='int32x4')
 arm_operand = functools.partial(loader, cast_type='int8x16')
 arm_writeback = functools.partial(writer, llvm_intrin='llvm.aarch64.neon.sdot.v4i32.v16i8', dtype='int32x4')
 from .pattern import arm_sdot128_i8i16
-arm_schedule = functools.partial(schedule, pattern=arm_sdot128_i8i16, pragma='vdot', max_threads=10000)
+arm_schedule = functools.partial(schedule, pattern=arm_sdot128_i8i16, pragma='vdot', max_threads=3000)

@@ -10,7 +10,10 @@ from topi.util import get_const_tuple
 import topi
 from tvm.relay import op
 
-#ic, h, w, oc, _, kh, kw, sh, sw = map(int, input().split())
+##ic, h, w, oc, _, kh, kw, sh, sw = map(int, input().split())
+#ic, h, w, oc, kh, sh = map(int, input().split())
+#kw = kh
+#sw = sh
 #
 #if ic % 4:
 #    ic += 4 - ic % 4
@@ -35,8 +38,7 @@ passes = [(1, tensorizer.rewrite)]
 from tensorizer import tune
 tune.cpu_idx = 0
 target = -1
-result = 1e9
-baseline = None
+results = []
 virgin = True
 while True:
     with tvm.transform.PassContext(opt_level=3, config={'tir.add_lower_pass': passes}), tvm.target.create('llvm -mcpu=cascadelake'):
@@ -55,20 +57,15 @@ while True:
         res = fte(nd_a, nd_b, nd_c)
         while np.var(res.results) > 1e-5:
             res = fte(nd_a, nd_b, nd_c)
-        if tune.cpu_idx == 0:
-            baseline = res.mean
-        if res.mean < result:
-            result = res.mean
-            target = tune.cpu_idx
+        results.append(res.mean)
 
     relay.backend.compile_engine.get().clear()
     tune.cpu_idx += 1
+    break
     if tune.cpu_idx - target > 8:
         break
     if tune.cpu_idx >= tune.total_idx:
         break
 
-result *= 1e6
-baseline *= 1e6
-with open('/home/ubuntu/Tensorization-PoC/cpu-tune.log', 'a') as f:
-    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {target}, {result}, {baseline}\n')
+with open('./cpu-tune.log', 'a') as f:
+    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {results}\n')
