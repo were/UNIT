@@ -163,18 +163,24 @@ def schedule(outs, strides, pattern, pragma, max_threads):
                     reduction.append(axis)
                 else:
                     simple.append(axis)
+            sch[op].pragma(stencil[0], 'tensorize', pragma)
+
+            if tune.parallel_only:
+                if str(op) != str(output):
+                    sch[op].reorder(*(simple + unroll + reduction + stencil))
+                else:
+                    sch[op].reorder(*([fusion] + unroll + simple + reduction + stencil))
+                return
+
             for i in unroll:
                 sch[op].unroll(i)
-            sch[op].pragma(stencil[0], 'tensorize', pragma)
             #if simple:
             #    unroll = [simple[-1]] + unroll
             #    simple = simple[:-1]
             if str(op) != str(output):
-                #sch[op].reorder(*(simple + reduction + unroll + stencil))
-                sch[op].reorder(*(simple + unroll + reduction + stencil))
+                sch[op].reorder(*(simple + reduction + unroll + stencil))
             else:
-                #sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
-                sch[op].reorder(*([fusion] + unroll + simple + reduction + stencil))
+                sch[op].reorder(*([fusion] + simple + reduction + unroll + stencil))
 
     traverse_inline(sch, output, callback)
 

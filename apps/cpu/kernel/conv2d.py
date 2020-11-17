@@ -10,38 +10,43 @@ from topi.util import get_const_tuple
 import topi
 from tvm.relay import op
 
-##ic, h, w, oc, _, kh, kw, sh, sw = map(int, input().split())
-#ic, h, w, oc, kh, sh = map(int, input().split())
-#kw = kh
-#sw = sh
-#
-#if ic % 4:
-#    ic += 4 - ic % 4
-#
-#if oc % 16:
-#    oc += 16 - oc % 16
-#
-#a = tvm.te.placeholder((1, ic // 16, h, w, 16), dtype='int8')
-#if ic % 16 == 0:
-#    b = tvm.te.placeholder((oc // 16, ic // 16, kh, kw, 4, 16, 4), dtype='int8')
-#else:
-#    assert ic % 4 == 0
-#    a = tvm.te.placeholder((1, ic // 4, h, w, 4), dtype='int8')
-#    b = tvm.te.placeholder((oc // 16, ic // 4, kh, kw, 1, 16, 4), dtype='int8')
+#ic, h, w, oc, _, kh, kw, sh, sw = map(int, input().split())
+_, ic, h, w, oc, _, kh, _, sh, _ = map(int, input().split())
+kw = kh
+sw = sh
 
-N, C, H, W, c, O, I, KH, KW, e, o, i, sh, sw = map(int, input().split())
+if ic % 4:
+    ic += 4 - ic % 4
 
-a = tvm.te.placeholder((N, C, H, W, c), dtype='int8')
-b = tvm.te.placeholder((O, I, KH, KW, e, o, i), dtype='int8')
+if oc % 16:
+    oc += 16 - oc % 16
+
+a = tvm.te.placeholder((1, ic // 16, h, w, 16), dtype='int8')
+if ic % 16 == 0:
+    b = tvm.te.placeholder((oc // 16, ic // 16, kh, kw, 4, 16, 4), dtype='int8')
+else:
+    assert ic % 4 == 0
+    a = tvm.te.placeholder((1, ic // 4, h, w, 4), dtype='int8')
+    b = tvm.te.placeholder((oc // 16, ic // 4, kh, kw, 1, 16, 4), dtype='int8')
+
+#N, C, H, W, c, O, I, KH, KW, e, o, i, sh, sw = map(int, input().split())
+
+#a = tvm.te.placeholder((N, C, H, W, c), dtype='int8')
+#b = tvm.te.placeholder((O, I, KH, KW, e, o, i), dtype='int8')
 
 passes = [(1, tensorizer.rewrite)]
 from tensorizer import tune
-tune.cpu_idx = 0
+tune.cpu_idx = -1
 target = -1
 results = []
-virgin = True
+result = 1e9
+
 while True:
     with tvm.transform.PassContext(opt_level=3, config={'tir.add_lower_pass': passes}), tvm.target.create('llvm -mcpu=cascadelake'):
+        if tune.cpu_idx == -1:
+            tune.cpu_idx = 0
+            tune.parallel_only = True
+
         conv = topi.nn.conv2d_NCHWc_int8(a, b, stride=(sh, sw), padding=0, dilation=1, out_dtype='int32',
                                          layout='NCHW4c', out_layout='NCHW16c')
         sch = tensorizer.INTRINSICS['vnni']['schedule']([conv], (sh, sw))
@@ -59,9 +64,16 @@ while True:
             res = fte(nd_a, nd_b, nd_c)
         results.append(res.mean)
 
+        if tune.parallel_only:
+            tune.cpu_idx = -1
+            tune.parallel_only = False
+
+        if res.mean < result:
+            target = tune.cpu_idx
+            result = res.mean
+
     relay.backend.compile_engine.get().clear()
     tune.cpu_idx += 1
-    break
     if tune.cpu_idx - target > 8:
         break
     if tune.cpu_idx >= tune.total_idx:

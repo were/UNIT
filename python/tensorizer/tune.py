@@ -13,6 +13,8 @@ padding = None
 splitk = None
 x86 = {}
 
+parallel_only = None
+
 HOME = os.getenv("HOME")
 
 def load_x86():

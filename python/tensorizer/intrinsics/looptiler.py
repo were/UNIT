@@ -21,6 +21,7 @@ def _ceil_div(a, b):
 
 def analyze_tiling(op, pattern, max_unroll=32, max_parallel=3000):
 
+    print(tvm.arith._ffi_api)
     info = list(tvm.arith._ffi_api.MatchTensorizer(op, pattern))
     assert info
     loops = {}

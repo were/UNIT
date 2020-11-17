@@ -39,7 +39,9 @@ def tracer(module, info, is_before):
 result = 1e9
 target = -1
 from tensorizer import tune
-tune.cpu_idx = 0
+tune.cpu_idx = -1
+results = []
+
 while True:
     with tvm.transform.PassContext(opt_level=3, trace=tracer, config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]}):
         graph, lib, params = tvm.relay.build(module, target='llvm -mcpu=cascadelake')
@@ -52,6 +54,7 @@ while True:
 
         timer = func.module.time_evaluator('run', ctx=tvm.cpu(0), number=3, repeat=10)
         timed = timer()
+        results.append(timed.mean)
 
         if timed.mean < result:
             result = timed.mean
@@ -64,7 +67,7 @@ while True:
     if tune.cpu_idx >= tune.total_idx:
         break
 
-with open('/home/ubuntu/Tensorization-PoC/cpu-tune.log', 'a') as f:
+with open('./cpu-tune.log', 'a') as f:
     f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {target}\n')
 
-print(result, target, tune.cpu_idx)
+#print(result, target, tune.cpu_idx)
