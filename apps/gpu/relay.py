@@ -87,6 +87,7 @@ for i in [None, 'fuse', 'pad'] if ow < 32 else [None]:
         if j > tune.total_idx:
             break
 
-with open('/home/ubuntu/gpu-tune.log', 'a') as f:
+
+with open(os.getenv('HOME') + '/ablation.log', 'a') as f:
     f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {results}, {base}\n')
     f.write(f'{n} {c} {h} {w} {oc} {ic} {kh} {kw} {sh} {sw} {results}, {base}\n')
