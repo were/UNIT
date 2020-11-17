@@ -214,3 +214,4 @@ def cleanup(store, axis, operands):
 
     res = tvm.tir.SeqStmt(res)
     return res
+

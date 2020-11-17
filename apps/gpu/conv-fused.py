@@ -3,8 +3,8 @@ from tvm import te, arith
 from tensorizer.intrinsics import INTRINSICS
 import numpy as np
 
-n, c, h, w = 1, 512, 10, 10
-kh, kw, ic, ko = 3, 3, c, 512
+n, c, h, w = 1, 192, 18, 18
+kh, kw, ic, ko = 3, 3, c, 192
 
 a = te.placeholder((n, c // 16, h, w, 16), 'float16')
 b = te.placeholder((ko // 16, ic // 16, kh, kw, 16, 16), 'float16')

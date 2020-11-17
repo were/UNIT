@@ -36,8 +36,8 @@ from mxnet.contrib.quantization import *
 import statistics
 
 
-target = 'nvptx'
-#target = 'cuda -libs=cublas,cudnn'
+#target = 'nvptx -libs=cublas,cudnn'
+target = 'cuda -libs=cublas,cudnn'
 
 def load_model(symbol_file, param_file, logger=None):
     cur_path = os.path.dirname(os.path.realpath(__file__))
@@ -62,7 +62,6 @@ def load_model(symbol_file, param_file, logger=None):
 
 
 def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
-    tune = False
 
     input_shape = [1] + list(data_shape)
     input_dict = {'data': input_shape}
@@ -91,6 +90,8 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
             print('Executes: ', info.name, (time.time() - timing) * 1000)
 
     import tensorizer
+    from tensorizer import tune
+    tune.enable = True
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3, disabled_pass=['FoldScaleAxis']):
     #with tvm.transform.PassContext(trace=tracer, opt_level=4):
@@ -135,8 +136,13 @@ if __name__ == '__main__':
     parser.add_argument('--data-layer-type', type=str, default="float32",
                         choices=['float32', 'int8', 'uint8'],
                         help='data type for data layer')
+    parser.add_argument('--target', type=str, default=None,
+                        help='baseline or tensorization')
 
     args = parser.parse_args()
+
+    if args.target is not None:
+        target = args.target + " -libs=cudnn,cublas"
 
     if args.ctx == 'gpu':
         ctx = mx.gpu(0)

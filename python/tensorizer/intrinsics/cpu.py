@@ -75,8 +75,13 @@ def schedule(outs, strides, pattern, pragma, max_threads):
 
             if tune.cpu_idx is None:
                 to_apply = points[0][-1]
-                #with open('/home/ubuntu/Tensorization-PoC/cpu-shapes.log', 'a') as f:
-                #    f.write(f'{tune.ashape} {tune.bshape} {tune.strides} {tune.model}\n')
+                import os
+                HOME = os.getenv("HOME")
+                try:
+                    f = open(HOME + '/Tensorization-PoC/cpu-shapes.log', 'a')
+                except:
+                    f = open(HOME + '/UNIT/cpu-shapes.log', 'a')
+                f.write(f'{tune.ashape} {tune.bshape} {tune.strides}\n')
                 if (tune.ashape, tune.bshape, tune.strides) in tune.x86.keys():
                     to_apply = points[tune.x86[(tune.ashape, tune.bshape, tune.strides)]][-1]
             else:
@@ -186,4 +191,5 @@ arm_acc = functools.partial(loader, cast_type='int32x4')
 arm_operand = functools.partial(loader, cast_type='int8x16')
 arm_writeback = functools.partial(writer, llvm_intrin='llvm.aarch64.neon.sdot.v4i32.v16i8', dtype='int32x4')
 from .pattern import arm_sdot128_i8i16
-arm_schedule = functools.partial(schedule, pattern=arm_sdot128_i8i16, pragma='vdot', max_threads=3000)
+#arm_schedule = functools.partial(schedule, pattern=arm_sdot128_i8i16, pragma='vdot', max_threads=3000)
+arm_schedule = functools.partial(schedule, pattern=arm_sdot128_i8i16, pragma='vdot', max_threads=10000)

@@ -3,6 +3,7 @@ from topi.cuda.injective import schedule_injective_from_existing
 from tvm import te
 from tvm import autotvm
 import tvm
+from tensorizer import tune
 
 @autotvm.register_topi_compute('conv2d_NCHW16c_OHWI16o.nvptx')
 def _conv2d_NCHW16c_OHWI16o_impl(cfg, a, b, stride_h, stride_w, out_type):
@@ -70,7 +71,17 @@ def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
         sch[buffer].vectorize(xi)
 
     rc = sch[conv].op.reduce_axis[0]
-    rco, rci = sch[conv].split(rc, 64)
+    for i in [16, 32, 64]:
+        if rc.dom.extent.value % i == 0:
+            split_k = i
+    print('!!!!!!!!!!!!!!!')
+    print(tune.splitk)
+    if tune.splitk is not None:
+        tune.total_idx = split_k
+        split_k = tune.splitk
+
+    rc = sch[conv].op.reduce_axis[0]
+    rco, rci = sch[conv].split(rc, split_k)
     rcio, rcii = sch[conv].split(rci, 16)
     rf = sch.rfactor(conv, rcio)
     cc = sch.cache_write(rf, 'wmma.accumulator')
@@ -83,7 +94,9 @@ def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
     xyio, xyii = sch[conv].split(xyi, 16)
     obo, obi = sch[conv].split(ob, 8)
     sch[conv].reorder(batch, oco, xyo, oci, xyio, xyii, obo, obi)
-    sch[conv].bind(sch[conv].fuse(oci, xyio), te.thread_axis('threadIdx.y'))
+    fused = sch[conv].fuse(oci, xyio)
+    fo, fi = sch[conv].split(fused, split_k // 16)
+    sch[conv].bind(fi, te.thread_axis('threadIdx.y'))
     sch[conv].bind(sch[conv].fuse(xyii, obo), te.thread_axis('threadIdx.x'))
     sch[conv].vectorize(obi)
     sch[rf].compute_at(sch[conv], xyo)
@@ -99,7 +112,9 @@ def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
         xyio, xyii = sch[output].split(xyi, 16)
         obo, obi = sch[output].split(ob, 8)
         sch[output].reorder(batch, oco, xyo, oci, xyio, xyii, obo, obi)
-        sch[output].bind(sch[output].fuse(oci, xyio), te.thread_axis('threadIdx.y'))
+        fused = sch[output].fuse(oci, xyio)
+        fo, fi = sch[output].split(fused, split_k // 16)
+        sch[output].bind(fi, te.thread_axis('threadIdx.y'))
         sch[output].bind(sch[output].fuse(xyii, obo), te.thread_axis('threadIdx.x'))
         sch[output].vectorize(obi)
         sch[output].bind(oco, te.thread_axis('blockIdx.y'))
@@ -134,7 +149,7 @@ def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
         sch[aaii].compute_at(sch[cc], crw)
         sch[a_icol].compute_inline()
         fused = sch[aaii].fuse(sch[aaii].op.axis[1], sch[aaii].op.axis[2], sch[aaii].op.axis[3])
-        fo, fi = sch[aaii].split(fused, nparts=4)
+        fo, fi = sch[aaii].split(fused, nparts=split_k // 16)
         fio, fii = sch[aaii].split(fi, nparts=32)
         sch[aaii].bind(fo, te.thread_axis('threadIdx.y'))
         sch[aaii].bind(fio, te.thread_axis('threadIdx.x'))
@@ -143,10 +158,10 @@ def _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w):
     else:
         a_reuse = sch.cache_read(a, 'shared', [cc])
         sch[a_reuse].compute_at(sch[cc], crcio)
-        schedule_fetcher(sch, a_reuse, 4, 32)
+        schedule_fetcher(sch, a_reuse, split_k // 16, 32)
         a_shared = sch.cache_read(a_reuse, 'shared', [cc])
         sch[a_shared].compute_at(sch[cc], crw)
-        schedule_fetcher(sch, a_shared, 4, 32)
+        schedule_fetcher(sch, a_shared, split_k // 16, 32)
     
     aa = sch.cache_read(a_shared, 'wmma.matrix_a', [cc])
     #aa = sch.cache_read(a, 'wmma.matrix_a', [cc])
@@ -168,6 +183,12 @@ def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
         if rc.dom.extent.value % i == 0:
             split_k = i
 
+    print('!!!!!!!!!!!!!!!!!')
+    print(tune.splitk)
+    if tune.splitk is not None:
+        tune.total_idx = split_k
+        split_k = tune.splitk
+
     rc = sch[conv].op.reduce_axis[0]
     rco, rci = sch[conv].split(rc, split_k)
     rcio, rcii = sch[conv].split(rci, 16)
@@ -182,7 +203,8 @@ def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
     sch[conv].reorder(batch, x, yo, oco, oo, oci, yio, oio, yii, oii)
     sch[rf].compute_at(sch[conv], oo)
     fused = sch[conv].fuse(oci, yio, oio)
-    sch[conv].bind(fused, te.thread_axis('threadIdx.y'))
+    fo, fi = sch[conv].split(fused, split_k // 16)
+    sch[conv].bind(fi, te.thread_axis('threadIdx.y'))
     vo, vi = sch[conv].split(oii, 8)
     sch[conv].vectorize(vi)
     fused = sch[conv].fuse(yii, vo)
@@ -206,10 +228,7 @@ def _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w):
         sch[output].bind(x, te.thread_axis('blockIdx.x'))
 
         fused = sch[output].fuse(oci, yio, oio)
-        if rf_rw:
-            fo, fi = sch[output].split(fused, nparts=conv.op.reduce_axis[2].dom.extent.value)
-        else:
-            fo, fi = sch[output].split(fused, nparts=(split_k // 16))
+        fo, fi = sch[output].split(fused, nparts=(split_k // 16))
         sch[output].bind(fo, te.thread_axis('threadIdx.y'))
         vo, vi = sch[output].split(oii, 8)
         sch[output].vectorize(vi)
@@ -268,10 +287,16 @@ def conv2d_NCHW16c_OHWI16o_schedule(attrs, outs, target):
         nonlocal sch
         if len(list(op.reduce_axis)):
             a, b = op.input_tensors
+            tune.ashape = get_const_tuple(a.shape)
+            tune.bshape = get_const_tuple(b.shape)
 
             conv = op.output(0)
             n, c, h, w, _ = get_const_tuple(conv.shape)
             stride_h, stride_w = attrs.get_int_tuple('strides')
+            tune.strides = (stride_h, stride_w)
+            ky = tune.ashape, tune.bshape, (stride_h, stride_w)
+            if tune.enable and ky in tune.cuda_kernel.keys():
+                tune.splitk = int(tune.cuda_kernel[ky])
             if w % 32 == 0:
                 _conv2d_schedule_wdim(sch, conv, output, stride_h, stride_w)
             else:
@@ -279,5 +304,7 @@ def conv2d_NCHW16c_OHWI16o_schedule(attrs, outs, target):
                 _conv2d_schedule_fused(sch, conv, output, stride_h, stride_w)
 
     traverse_inline(sch, output, callback)
+
+    tune.splitk = None
 
     return sch
