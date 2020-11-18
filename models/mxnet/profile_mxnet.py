@@ -130,7 +130,7 @@ if __name__ == '__main__':
     parser.add_argument('--score_tvm', type=bool, default=False, help='score tvm')
     parser.add_argument('--symbol-file', type=str, required=True, help='symbol file path')
     parser.add_argument('--param-file', type=str, required=False, help='param file path')
-    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--label-name', type=str, default='softmax_label')
     parser.add_argument('--dataset', type=str, required=False, help='dataset path')
     parser.add_argument('--rgb-mean', type=str, default='0,0,0')

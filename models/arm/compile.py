@@ -96,7 +96,8 @@ def compile_via_tvm(sym, arg_params, aux_params, symbol_file, data_shape):
     print('Model Load!')
     import tensorizer
     from tensorizer import tune
-    tune.enable = True
+    tune.enable = False
+    tune.cpu_idx = None
     with tvm.transform.PassContext(config={'tir.add_lower_pass': [(1, tensorizer.rewrite)]},
                                    trace=tracer, opt_level=3):
             graph, lib, params = relay.build_module.build(
@@ -140,8 +141,14 @@ if __name__ == '__main__':
     parser.add_argument('--data-layer-type', type=str, default="float32",
                         choices=['float32', 'int8', 'uint8'],
                         help='data type for data layer')
+    parser.add_argument('--target', type=str, default="tensorize")
 
     args = parser.parse_args()
+
+    if args.target == 'tensorize':
+        target = 'llvm -device=arm_cpu -mtriple=aarch64-none-linux-gnu -mattr=+v8.2a,+dotprod,+neon'
+    else:
+        target = 'llvm -device=arm_cpu -mtriple=aarch64-none-linux-gnu -mattr=+v8.2a,+neon'
 
     if args.ctx == 'gpu':
         ctx = mx.gpu(0)
